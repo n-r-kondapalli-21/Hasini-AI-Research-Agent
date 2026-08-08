@@ -28,7 +28,7 @@ Hasini_Ai_Research_Agent/
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/n-r-kondapalli-21/Hasini-AI-Research-Agent.git
    cd Hasini_Ai_Research_Agent
    ```
 
