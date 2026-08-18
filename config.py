@@ -7,7 +7,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 ZAI_API_KEY = os.getenv("ZAI_API_KEY")
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")  #here we can choose which provider should llm use 
 MODEL_NAME = os.getenv("MODEL_NAME")
 
 PROVIDERS = {
@@ -25,3 +25,11 @@ provider = PROVIDERS.get(LLM_PROVIDER)
 
 if provider is None:
     raise ValueError(f"Unsupported provider: {LLM_PROVIDER}")
+
+
+github_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")
+
+if not github_token:
+        raise ValueError(
+            "GITHUB_PERSONAL_ACCESS_TOKEN is missing from .env"
+        )

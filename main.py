@@ -1,19 +1,32 @@
+import asyncio
+
 from langchain.agents import create_agent
 from system_prompt import SYSTEM_PROMPT
 from llm import llm
-from tools import tools
-
+from Tools.web_search import web_tools
+from mcp_servers.mcp_tools import get_mcp_tools
+from tool_commands import handle_tool_command
 
 history = []
 
-agent = create_agent(model=llm,tools=tools,system_prompt=SYSTEM_PROMPT)
+async def create_research_agent():
+
+    # Connect to Filesystem MCP
+    mcp_client, mcp_tools = await get_mcp_tools()
+
+    # Combine existing web tools + filesystem MCP tools
+    all_tools = web_tools + mcp_tools
+
+    agent = create_agent(model=llm,tools=all_tools,system_prompt=SYSTEM_PROMPT)
+
+    return agent, mcp_client, all_tools
 
 
-def Agent(query):
+async def Agent(query,agent):
 
     history.append({"role": "user","content": query})
 
-    response = agent.invoke({"messages": history})
+    response = await agent.ainvoke({"messages": history})
 
     agent_response = response["messages"][-1].content
 
@@ -21,26 +34,41 @@ def Agent(query):
 
     return f"Hasini: {agent_response}"
 
-if __name__=="__main__":
+async def main():
+    agent,mcp_client,all_tools = await create_research_agent()
+
     print("=" * 50)
-    print("🤖 AI Agent Started")
-    print("Type 'exit' or 'quit' to stop.")
+    print("🤖 AI Research Agent Started")
+    print("=" * 50)
+
+    print("Commands:")
+    print("  /tools")
+    print("  /tools filesystem")
+    print("  /tools github")
+    print("  /tools web")
+    print("  /tool <tool_name>")
+    print("  exit / quit")
+
     print("=" * 50)
 
     while True:
-        user_input = input("\nYou: ").strip()
-        if user_input.lower() in {"exit", "quit"}:
-            print("\n Goodbye!")
-            break
+            user_input = input("\nYou: ").strip()
+            if user_input.lower() in {"exit", "quit"}:
+                print("\n Goodbye!")
+                break
+    
+            if not user_input:
+                continue
 
-        if not user_input:
-            continue
-
-        response=Agent(user_input)
-
-        print(response)
- 
-
+             # Handle tool commands
+            if handle_tool_command(user_input,all_tools,web_tools):
+                continue
 
     
+            response = await Agent(user_input,agent)
+    
+            print(response)
+     
 
+if __name__=="__main__":
+   asyncio.run(main())
