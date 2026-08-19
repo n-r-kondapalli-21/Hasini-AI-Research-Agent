@@ -2,12 +2,12 @@ import asyncio
 
 from langchain.agents import create_agent
 from system_prompt import SYSTEM_PROMPT
-from llm import llm
+from services.llm import llm
 from Tools.web_search import web_tools
 from mcp_servers.mcp_tools import get_mcp_tools
 from tool_commands import handle_tool_command
+from services.conversation_memory import ConversationMemory
 
-history = []
 
 async def create_research_agent():
 
@@ -22,20 +22,22 @@ async def create_research_agent():
     return agent, mcp_client, all_tools
 
 
-async def Agent(query,agent):
+async def Agent(query,agent,memory):
 
-    history.append({"role": "user","content": query})
+    memory.add_user_message(query)
 
-    response = await agent.ainvoke({"messages": history})
+    response = await agent.ainvoke({"messages": memory.get_history()})
 
     agent_response = response["messages"][-1].content
 
-    history.append({"role": "assistant","content": agent_response})
+    memory.add_assistant_message(agent_response)
 
-    return f"Hasini: {agent_response}"
+    return agent_response
 
 async def main():
     agent,mcp_client,all_tools = await create_research_agent()
+
+    memory = ConversationMemory(history_limit=10,enabled=True)
 
     print("=" * 50)
     print("🤖 AI Research Agent Started")
@@ -65,9 +67,9 @@ async def main():
                 continue
 
     
-            response = await Agent(user_input,agent)
+            response = await Agent(user_input,agent,memory)
     
-            print(response)
+            print(f"Hasini: {response}")
      
 
 if __name__=="__main__":

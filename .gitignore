@@ -1,3 +1,17 @@
-/.env
-/venv
+# Python
+__pycache__/
+*.pyc
 
+# Virtual Environment
+venv/
+env/
+
+# Environment
+.env
+
+# Models
+/models
+
+# Runtime files
+runtime/
+*.wav
