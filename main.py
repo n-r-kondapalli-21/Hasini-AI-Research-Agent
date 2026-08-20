@@ -21,18 +21,76 @@ async def create_research_agent():
 
     return agent, mcp_client, all_tools
 
+#this function provides entire responce of an llm at a time 
+# async def Agent(query,agent,memory):
 
-async def Agent(query,agent,memory):
+#     memory.add_user_message(query)
+
+#     response = await agent.ainvoke({"messages": memory.get_history()})
+
+#     agent_response = response["messages"][-1].content
+
+#     memory.add_assistant_message(agent_response)
+
+#     return agent_response
+
+#updated phase 2 function to get llm responce as a streams 
+async def Agent_stream(query, agent, memory):
+    """
+    Stream agent response token-by-token.
+
+    Yields:
+        Text chunks as they are generated.
+    """
 
     memory.add_user_message(query)
 
-    response = await agent.ainvoke({"messages": memory.get_history()})
+    full_response = ""
 
-    agent_response = response["messages"][-1].content
+    async for chunk in agent.astream(
+        {"messages": memory.get_history()},
+        stream_mode="messages",
+    ):
+        message, metadata = chunk
 
-    memory.add_assistant_message(agent_response)
+        if not message:
+            continue
 
-    return agent_response
+        content = getattr(message, "content", "")
+
+        if not content:
+            continue
+
+        # Some providers can return structured content.
+        if isinstance(content, list):
+
+            text_parts = []
+
+            for item in content:
+
+                if isinstance(item, dict):
+
+                    text = item.get("text", "")
+
+                    if text:
+                        text_parts.append(text)
+
+                elif isinstance(item, str):
+
+                    text_parts.append(item)
+
+            content = "".join(text_parts)
+
+        if not content:
+            continue
+
+        full_response += content
+
+        yield content
+
+    # Save the complete response only after streaming finishes.
+    memory.add_assistant_message(full_response)
+
 
 async def main():
     agent,mcp_client,all_tools = await create_research_agent()
@@ -67,10 +125,17 @@ async def main():
                 continue
 
     
-            response = await Agent(user_input,agent,memory)
-    
-            print(f"Hasini: {response}")
-     
+            print("\nHasini: ", end="", flush=True)
+
+            async for chunk in Agent_stream(
+                user_input,
+                agent,
+                memory
+            ):
+                print(chunk, end="", flush=True)
+
+            print()
+                
 
 if __name__=="__main__":
    asyncio.run(main())

@@ -15,13 +15,13 @@ async def get_mcp_tools():
                 ],
             },
 
-            "github": {
-                    "transport": "streamable_http",
-                    "url": "https://api.githubcopilot.com/mcp/",
-                    "headers": {
-                        "Authorization": f"Bearer {github_token}"
-                    },
-                },
+            # "github": {
+            #         "transport": "streamable_http",
+            #         "url": "https://api.githubcopilot.com/mcp/",
+            #         "headers": {
+            #             "Authorization": f"Bearer {github_token}"
+            #         },
+            #     },
         }
     )
 
