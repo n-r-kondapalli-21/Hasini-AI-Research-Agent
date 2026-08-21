@@ -37,7 +37,7 @@ WHISPER_CPU_THREADS = 2
 
 
 # --------------------------------------------------
-# Phase 2 - Voice Activity Detection
+# Voice Activity Detection
 # --------------------------------------------------
 
 VAD_THRESHOLD = 0.5
@@ -52,3 +52,14 @@ VAD_SPEECH_PAD_MS = 80
 VAD_FRAME_MS = 32
 
 VAD_FRAME_SAMPLES = int(INPUT_SAMPLE_RATE * VAD_FRAME_MS / 1000)
+
+
+# ============================================================
+# Voice Providers
+# ============================================================
+
+STT_PROVIDER = "faster_whisper"
+
+TTS_PROVIDER = "piper"
+
+VAD_PROVIDER = "silero"

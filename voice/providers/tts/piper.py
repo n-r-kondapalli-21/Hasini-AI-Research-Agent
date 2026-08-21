@@ -8,19 +8,17 @@ import soundfile as sf
 
 from piper import PiperVoice
 
-from .config import (
+from ...config import (
     PIPER_MODEL,
     PIPER_OUTPUT_FILE,
 )
 
+from .base import TTSProvider
 
-class TextToSpeech:
+
+class PiperTTS(TTSProvider):
     """
-    Local Text-to-Speech using Piper.
-
-    Supports:
-    - Existing complete-response synthesis
-    - Low-latency streaming synthesis
+    Piper Text-to-Speech provider.
     """
 
     def __init__(self):
@@ -35,7 +33,7 @@ class TextToSpeech:
         if output_directory:
             os.makedirs(
                 output_directory,
-                exist_ok=True
+                exist_ok=True,
             )
 
         if not os.path.isfile(self.model):
@@ -63,11 +61,6 @@ class TextToSpeech:
         )
 
     def synthesize(self, text: str):
-        """
-        Existing complete-response synthesis.
-
-        Kept for compatibility with current code.
-        """
 
         if not text or not text.strip():
             return None, None
@@ -101,12 +94,6 @@ class TextToSpeech:
         return audio, sample_rate
 
     def synthesize_stream(self, text: str):
-        """
-        Low-latency Piper synthesis.
-
-        PiperVoice stays loaded in memory and
-        yields audio chunks directly.
-        """
 
         if not text or not text.strip():
             return

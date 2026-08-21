@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from .tts import TextToSpeech
+from .providers.factory import create_tts_provider
 from .audio_queue import OrderedAudioQueue
 
 
@@ -73,7 +73,7 @@ async def main():
     print("PHASE 2.4 - ORDERED TTS TEST")
     print("=" * 60)
 
-    tts = TextToSpeech()
+    tts = create_tts_provider()
 
     player = OrderedAudioQueue()
 

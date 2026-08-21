@@ -4,10 +4,9 @@ import re
 import numpy as np
 
 from .audio_io import record_until_silence
-from .vad import SpeechVAD
-from .stt import SpeechToText
-from .tts import TextToSpeech
+from .providers.factory import (create_stt_provider,create_tts_provider,create_vad_provider)
 from .segmenter import ResponseSegmenter
+
 from .audio_queue import OrderedAudioQueue
 
 from .config import MAX_RECORD_SECONDS
@@ -263,12 +262,12 @@ async def voice_loop(agent):
 
     print("\n🧠 Loading voice components...")
 
-    vad = SpeechVAD()
+    vad = create_vad_provider()
 
-    stt = SpeechToText()
+    stt = create_stt_provider()
 
-    tts = TextToSpeech()
-
+    tts = create_tts_provider()
+    
     memory = ConversationMemory(
         history_limit=10,
         enabled=True,

@@ -1,4 +1,4 @@
-from .vad import SpeechVAD
+from .providers.factory import create_vad_provider
 from .audio_io import record_until_silence
 from .config import MAX_RECORD_SECONDS
 
@@ -9,7 +9,7 @@ def main():
     print("🎤 Phase 2.1 - VAD Test")
     print("=" * 50)
 
-    vad = SpeechVAD()
+    vad = create_vad_provider()
 
     audio = record_until_silence(
         vad,
