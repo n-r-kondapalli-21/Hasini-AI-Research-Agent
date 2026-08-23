@@ -9,7 +9,8 @@ from .segmenter import ResponseSegmenter
 
 from .audio_queue import OrderedAudioQueue
 
-from .config import MAX_RECORD_SECONDS
+from .config import MAX_RECORD_SECONDS, VOICE_TEST_MODE
+from .test.test_response import TEST_RESPONSE
 
 from main import create_research_agent, Agent_stream
 from services.conversation_memory import ConversationMemory
@@ -133,6 +134,14 @@ async def synthesize_chunk(
             )
 
 
+async def _get_test_stream():
+    words = TEST_RESPONSE.split(" ")
+    for i, word in enumerate(words):
+        token = word + (" " if i < len(words) - 1 else "")
+        yield token
+        await asyncio.sleep(0.02)
+
+
 async def process_voice_command(
     text,
     agent,
@@ -169,11 +178,17 @@ async def process_voice_command(
 
     try:
 
-        async for token in Agent_stream(
-            text,
-            agent,
-            memory,
-        ):
+        stream = (
+            _get_test_stream()
+            if VOICE_TEST_MODE
+            else Agent_stream(
+                text,
+                agent,
+                memory,
+            )
+        )
+
+        async for token in stream:
 
             # ------------------------------------------
             # Feed token into segmenter

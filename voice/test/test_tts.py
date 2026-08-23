@@ -4,7 +4,7 @@ import sys
 import sounddevice as sd
 import soundfile as sf
 
-from .config import PIPER_MODEL, PIPER_OUTPUT_FILE_TEST
+from ..config import PIPER_MODEL, PIPER_OUTPUT_FILE_TEST
 
 
 TEXT = "Hello. I am Hasini, your AI research assistant."

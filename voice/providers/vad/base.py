@@ -14,7 +14,7 @@ class VADProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def process(self, audio_frame):
+    def process(self, audio_frame, min_silence_ms: float | None = None):
         """
         Process an audio frame.
 

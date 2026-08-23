@@ -1,4 +1,4 @@
-from .segmenter import ResponseSegmenter
+from ..segmenter import ResponseSegmenter
 
 
 def test_sentence_boundary():

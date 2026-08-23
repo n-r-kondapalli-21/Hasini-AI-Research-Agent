@@ -1,8 +1,8 @@
 import asyncio
 import time
 
-from .providers.factory import create_tts_provider
-from .audio_queue import OrderedAudioQueue
+from ..providers.factory import create_tts_provider
+from ..audio_queue import OrderedAudioQueue
 
 
 async def synthesize_chunk(

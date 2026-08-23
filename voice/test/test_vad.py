@@ -1,6 +1,6 @@
-from .providers.factory import create_vad_provider
-from .audio_io import record_until_silence
-from .config import MAX_RECORD_SECONDS
+from ..providers.factory import create_vad_provider
+from ..audio_io import record_until_silence
+from ..config import MAX_RECORD_SECONDS
 
 
 def main():
