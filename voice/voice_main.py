@@ -9,22 +9,25 @@ from services.conversation_memory import (
     ConversationMemory,
 )
 
-from ..audio_capture import AudioCapture
-from ..audio_broadcaster import AudioBroadcaster
-from ..audio_queue import OrderedAudioQueue
+from .audio_capture import AudioCapture
+from .audio_broadcaster import AudioBroadcaster
+from .audio_queue import OrderedAudioQueue
 
-from ..providers.factory import (
+from .providers.factory import (
     create_stt_provider,
     create_tts_provider,
     create_vad_provider,
     create_wakeword_provider,
 )
 
-from ..command_listener import CommandListener
-from ..agent_controller import AgentController
-from ..barge_in_detector import BargeInDetector
-from ..state_machine import VoiceStateMachine
-from ..wake_listener import WakeWordListener
+from .confirmation_listener import VoiceConfirmationListener
+from .confirmation import ConfirmationManager
+
+from .command_listener import CommandListener
+from .agent_controller import AgentController
+from .barge_in_detector import BargeInDetector
+from .state_machine import VoiceStateMachine
+from .wake_listener import WakeWordListener
 
 
 async def main():
@@ -50,11 +53,31 @@ async def main():
     # VAD for normal command listening
     vad = create_vad_provider()
 
+    # Separate VAD for barge-in
+    barge_vad = create_vad_provider()
+
     # STT
     stt = create_stt_provider()
 
     # TTS
     tts = create_tts_provider()
+
+    # ==================================================
+    # Confirmation listener
+    #
+    # Uses the normal command VAD for now.
+    # ==================================================
+
+    confirmation_listener = VoiceConfirmationListener(
+        vad,
+        tts=tts,
+    )
+
+    confirmation_manager = ConfirmationManager(
+        listen_callback=confirmation_listener.listen,
+        speak_callback=confirmation_listener.speak,
+        timeout_seconds=15,
+    )
 
     # ==================================================
     # Audio playback queue
@@ -63,13 +86,11 @@ async def main():
     audio_queue = OrderedAudioQueue()
 
     # ==================================================
-    # Separate VAD for barge-in
-    # ==================================================
-
-    barge_vad = create_vad_provider()
-
-    # ==================================================
-    # Existing research agent
+    # Research agent
+    #
+    # IMPORTANT:
+    # The confirmation manager must be supplied while
+    # the gated MCP tools are being created.
     # ==================================================
 
     print(
@@ -77,7 +98,10 @@ async def main():
     )
 
     agent, mcp_client, all_tools = (
-        await create_research_agent()
+        await create_research_agent(
+            confirmation_manager=confirmation_manager,
+            mode="voice",
+        )
     )
 
     memory = ConversationMemory(
@@ -156,7 +180,7 @@ async def main():
     )
 
     print(
-        "🎤 Hasini Phase 3 Agent Test"
+        "🎤 Hasini Phase 4 Agent Test"
     )
 
     print(
@@ -164,16 +188,19 @@ async def main():
     )
 
     print(
-        "\nSay: Hey Jarvis"
+        "\nSay: 'Hey Jarvis' ONCE to start a continuous conversation session."
     )
 
     print(
-        "Then give your command."
+        "Hasini will respond and automatically keep listening for follow-up commands."
     )
 
     print(
-        "While Hasini is speaking, "
-        "interrupt her to test barge-in."
+        "For a MEDIUM/HIGH operation, Hasini will verbally ask for confirmation."
+    )
+
+    print(
+        "Say 'exit', 'quit', or 'goodbye' (or wait 8s) to end the session."
     )
 
     print(
@@ -210,6 +237,11 @@ async def main():
         await broadcaster.stop()
 
         await capture.stop()
+
+        try:
+            await mcp_client.close()
+        except Exception:
+            pass
 
         print(
             "✅ Hasini stopped."

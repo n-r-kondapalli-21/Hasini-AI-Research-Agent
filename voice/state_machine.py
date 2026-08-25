@@ -117,6 +117,9 @@ class VoiceStateMachine:
 
             VoiceState.LISTENING: {
 
+                VoiceEvent.LISTENING_STARTED:
+                    VoiceState.LISTENING,
+
                 VoiceEvent.SPEECH_COMPLETE:
                     VoiceState.TRANSCRIBING,
 
@@ -211,7 +214,7 @@ class VoiceStateMachine:
                     VoiceState.USER_INTERRUPT,
 
                 VoiceEvent.TTS_COMPLETE:
-                    VoiceState.IDLE,
+                    VoiceState.LISTENING,
 
                 VoiceEvent.STOP_REQUESTED:
                     VoiceState.IDLE,

@@ -5,6 +5,7 @@ from .config import VOICE_TEST_MODE
 from .audio_queue import OrderedAudioQueue
 from .segmenter import ResponseSegmenter
 from .test.test_response import TEST_RESPONSE
+from .confirmation import ConfirmationRejected, ConfirmationTimeout
 
 from .state_machine import (
     VoiceEvent,
@@ -525,6 +526,17 @@ class AgentController:
         except asyncio.CancelledError:
 
             raise
+
+        except (ConfirmationRejected, ConfirmationTimeout) as e:
+
+            print(
+                f"\n🛑 Action cancelled ({e.__class__.__name__}). "
+                "Stopping agent execution."
+            )
+
+            self.state_machine.reset()
+
+            return None
 
         except Exception as e:
 

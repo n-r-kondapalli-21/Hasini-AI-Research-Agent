@@ -1,40 +1,61 @@
 import asyncio
 
 from langchain.agents import create_agent
-from system_prompt import SYSTEM_PROMPT
+
+from system_prompt import get_system_prompt, SYSTEM_PROMPT
 from services.llm import llm
 from Tools.web_search import web_tools
 from mcp_servers.mcp_tools import get_mcp_tools
+from permission_registry import discover_permissions
 from tool_commands import handle_tool_command
 from services.conversation_memory import ConversationMemory
+from permission_gated_tool import create_permission_gated_tool
+from permission_registry import (
+    discover_permissions,
+    resolve_tool_server,
+)
 
 
-async def create_research_agent():
+async def create_research_agent(confirmation_manager=None, mode: str = "text"):
 
-    # Connect to Filesystem MCP
     mcp_client, mcp_tools = await get_mcp_tools()
 
-    # Combine existing web tools + filesystem MCP tools
-    all_tools = web_tools + mcp_tools
+    discover_permissions()
 
-    agent = create_agent(model=llm,tools=all_tools,system_prompt=SYSTEM_PROMPT)
+    gated_mcp_tools = []
+
+    for tool in mcp_tools:
+
+        server_id, method_name = resolve_tool_server(
+            tool.name
+        )
+
+        gated_tool = create_permission_gated_tool(
+            tool=tool,
+            server_id=server_id,
+            method_name=method_name,
+            confirmation_manager=confirmation_manager,
+        )
+
+        gated_mcp_tools.append(gated_tool)
+
+    all_tools = web_tools + gated_mcp_tools
+
+    prompt = get_system_prompt(mode)
+
+    agent = create_agent(
+        model=llm,
+        tools=all_tools,
+        system_prompt=prompt,
+    )
 
     return agent, mcp_client, all_tools
 
-#this function provides entire responce of an llm at a time 
-# async def Agent(query,agent,memory):
 
-#     memory.add_user_message(query)
+from langchain_core.messages import AIMessage, AIMessageChunk
+from voice.confirmation import ConfirmationRejected, ConfirmationTimeout
 
-#     response = await agent.ainvoke({"messages": memory.get_history()})
-
-#     agent_response = response["messages"][-1].content
-
-#     memory.add_assistant_message(agent_response)
-
-#     return agent_response
-
-#updated phase 2 function to get llm responce as a streams 
+# Phase 2 streaming function
 async def Agent_stream(query, agent, memory):
     """
     Stream agent response token-by-token.
@@ -47,55 +68,79 @@ async def Agent_stream(query, agent, memory):
 
     full_response = ""
 
-    async for chunk in agent.astream(
-        {"messages": memory.get_history()},
-        stream_mode="messages",
-    ):
-        message, metadata = chunk
+    try:
+        async for chunk in agent.astream(
+            {"messages": memory.get_history()},
+            stream_mode="messages",
+        ):
+            message, metadata = chunk
 
-        if not message:
-            continue
+            if not message:
+                continue
 
-        content = getattr(message, "content", "")
+            # --------------------------------------------------
+            # LangChain Message-Level Filtering:
+            #
+            # Only yield assistant/AI messages (AIMessage/AIMessageChunk).
+            # Ignore tool messages (ToolMessage), raw tool outputs,
+            # directory listings, and internal results.
+            # --------------------------------------------------
+            msg_type = getattr(message, "type", "")
+            if not isinstance(message, (AIMessage, AIMessageChunk)) and msg_type not in {"ai", "assistant"}:
+                continue
 
-        if not content:
-            continue
+            content = getattr(message, "content", "")
 
-        # Some providers can return structured content.
-        if isinstance(content, list):
+            if not content:
+                continue
 
-            text_parts = []
+            # Some providers can return structured content.
+            if isinstance(content, list):
 
-            for item in content:
+                text_parts = []
 
-                if isinstance(item, dict):
+                for item in content:
 
-                    text = item.get("text", "")
+                    if isinstance(item, dict):
 
-                    if text:
-                        text_parts.append(text)
+                        text = item.get("text", "")
 
-                elif isinstance(item, str):
+                        if text:
+                            text_parts.append(text)
 
-                    text_parts.append(item)
+                    elif isinstance(item, str):
 
-            content = "".join(text_parts)
+                        text_parts.append(item)
 
-        if not content:
-            continue
+                content = "".join(text_parts)
 
-        full_response += content
+            if not content:
+                continue
 
-        yield content
+            full_response += content
 
-    # Save the complete response only after streaming finishes.
-    memory.add_assistant_message(full_response)
+            yield content
+
+    except ConfirmationRejected:
+        print("\n🛑 Action cancelled by user.")
+        return
+    except ConfirmationTimeout:
+        print("\n⏱️ Confirmation timed out. Action cancelled.")
+        return
+    finally:
+        # Save the complete response only after streaming finishes successfully.
+        if full_response:
+            memory.add_assistant_message(full_response)
 
 
 async def main():
-    agent,mcp_client,all_tools = await create_research_agent()
 
-    memory = ConversationMemory(history_limit=10,enabled=True)
+    agent, mcp_client, all_tools = await create_research_agent()
+
+    memory = ConversationMemory(
+        history_limit=10,
+        enabled=True,
+    )
 
     print("=" * 50)
     print("🤖 AI Research Agent Started")
@@ -112,30 +157,35 @@ async def main():
     print("=" * 50)
 
     while True:
-            user_input = input("\nYou: ").strip()
-            if user_input.lower() in {"exit", "quit"}:
-                print("\n Goodbye!")
-                break
-    
-            if not user_input:
-                continue
 
-             # Handle tool commands
-            if handle_tool_command(user_input,all_tools,web_tools):
-                continue
+        user_input = input("\nYou: ").strip()
 
-    
-            print("\nHasini: ", end="", flush=True)
+        if user_input.lower() in {"exit", "quit"}:
+            print("\nGoodbye!")
+            break
 
-            async for chunk in Agent_stream(
-                user_input,
-                agent,
-                memory
-            ):
-                print(chunk, end="", flush=True)
+        if not user_input:
+            continue
 
-            print()
-                
+        # Handle tool commands
+        if handle_tool_command(
+            user_input,
+            all_tools,
+            web_tools,
+        ):
+            continue
 
-if __name__=="__main__":
-   asyncio.run(main())
+        print("\nHasini: ", end="", flush=True)
+
+        async for chunk in Agent_stream(
+            user_input,
+            agent,
+            memory,
+        ):
+            print(chunk, end="", flush=True)
+
+        print()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

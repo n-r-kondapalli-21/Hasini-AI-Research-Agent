@@ -11,6 +11,13 @@ from .state_machine import (
 from .providers.wakeword.base import WakeWordProvider
 
 
+import os
+import random
+import wave
+import numpy as np
+from .audio_io import play_audio
+
+
 class WakeWordListener:
     """
     Continuously listens for the configured wake word.
@@ -53,6 +60,68 @@ class WakeWordListener:
         self.running = False
 
         self.task = None
+
+        self.ack_sounds = []
+
+        self._load_ack_sounds()
+
+    def _load_ack_sounds(self):
+        assets_dir = os.path.join(
+            os.path.dirname(__file__),
+            "assets",
+        )
+
+        ack_files = [
+            ("ack_yes.wav", "Yes?"),
+            ("ack_listening.wav", "I'm listening."),
+            ("ack_go_ahead.wav", "Go ahead."),
+            ("ack_yes_listening.wav", "Yes, I'm listening."),
+        ]
+
+        self.ack_sounds = []
+        for filename, label in ack_files:
+            filepath = os.path.join(assets_dir, filename)
+            if os.path.exists(filepath):
+                try:
+                    with wave.open(filepath, "rb") as w:
+                        rate = w.getframerate()
+                        frames = w.readframes(w.getnframes())
+                        audio_np = (
+                            np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+                            / 32768.0
+                        )
+                        self.ack_sounds.append((audio_np, rate, label))
+                except Exception as e:
+                    print(f"⚠️ Could not load ack sound {filename}: {e}")
+
+        # Fallback to ack_short.wav if voice files are missing
+        if not self.ack_sounds:
+            chime_path = os.path.join(assets_dir, "ack_short.wav")
+            if os.path.exists(chime_path):
+                try:
+                    with wave.open(chime_path, "rb") as w:
+                        rate = w.getframerate()
+                        frames = w.readframes(w.getnframes())
+                        audio_np = (
+                            np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+                            / 32768.0
+                        )
+                        self.ack_sounds.append((audio_np, rate, "chime"))
+                except Exception:
+                    pass
+
+    def _play_random_ack(self):
+        if not self.ack_sounds:
+            return
+        audio, rate, label = random.choice(self.ack_sounds)
+        print(f"🗣️ Wake acknowledgement: \"{label}\"")
+        asyncio.create_task(
+            asyncio.to_thread(
+                play_audio,
+                audio,
+                rate,
+            )
+        )
 
     # ============================================================
     # START
@@ -173,6 +242,9 @@ class WakeWordListener:
                     self.state_machine.handle_event(
                         VoiceEvent.WAKE_WORD
                     )
+
+                    # Non-blocking preloaded voice acknowledgement playback
+                    self._play_random_ack()
 
                     # Stop processing additional wake-word
                     # chunks until the voice system returns

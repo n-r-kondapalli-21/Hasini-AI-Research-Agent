@@ -103,6 +103,6 @@ WAKEWORD_PROVIDER = "openwakeword"
 
 
 #voice test using pre-define responce to avoid repeated requested to llm while testing 
-VOICE_TEST_MODE = False              #True for enable Test mode  and False for disable 
-  
+VOICE_TEST_MODE = False          #True for enable Test mode  and False for disable 
+
 

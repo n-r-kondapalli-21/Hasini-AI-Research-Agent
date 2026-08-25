@@ -115,7 +115,7 @@ def main():
 
     assert (
         machine.state
-        == VoiceState.IDLE
+        == VoiceState.LISTENING
     )
 
     print("\n✅ State machine test passed.")

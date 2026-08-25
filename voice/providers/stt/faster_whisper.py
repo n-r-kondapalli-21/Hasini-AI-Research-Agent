@@ -1,3 +1,4 @@
+import math
 import time
 
 from faster_whisper import WhisperModel
@@ -38,7 +39,7 @@ class FasterWhisperSTT(STTProvider):
             f"✅ Whisper loaded in {load_time:.2f} seconds."
         )
 
-    def transcribe(self, audio) -> str:
+    def transcribe_with_confidence(self, audio) -> dict:
 
         segments, info = self.model.transcribe(
             audio,
@@ -64,9 +65,29 @@ class FasterWhisperSTT(STTProvider):
             without_timestamps=True,
         )
 
-        text = " ".join(
-            segment.text.strip()
-            for segment in segments
-        )
+        seg_list = list(segments)
+        if not seg_list:
+            return {"text": "", "confidence": 0.0}
 
-        return text.strip()
+        text = " ".join(
+            s.text.strip()
+            for s in seg_list
+        ).strip()
+
+        confidences = []
+        for s in seg_list:
+            if hasattr(s, "avg_logprob") and s.avg_logprob is not None:
+                conf = math.exp(s.avg_logprob)
+                confidences.append(conf)
+
+        avg_confidence = (sum(confidences) / len(confidences)) if confidences else 0.0
+        avg_confidence = max(0.0, min(1.0, float(avg_confidence)))
+
+        return {
+            "text": text,
+            "confidence": avg_confidence,
+        }
+
+    def transcribe(self, audio) -> str:
+        res = self.transcribe_with_confidence(audio)
+        return res["text"]

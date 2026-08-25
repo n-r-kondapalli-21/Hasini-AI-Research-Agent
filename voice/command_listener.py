@@ -338,9 +338,10 @@ class CommandListener:
 
         if not interrupted:
 
-            self.state_machine.handle_event(
-                VoiceEvent.LISTENING_STARTED
-            )
+            if self.state_machine.can_handle(VoiceEvent.LISTENING_STARTED):
+                self.state_machine.handle_event(
+                    VoiceEvent.LISTENING_STARTED
+                )
 
             print(
                 "🎤 Listening for command..."
@@ -434,6 +435,21 @@ class CommandListener:
                 elapsed
                 < self.wake_suppression_seconds
             ):
+
+                return
+
+            # Post-wake silence timeout (8s) if user hasn't started speaking
+            if elapsed > 8.0 and not self.audio_buffer:
+
+                print(
+                    "\n⏱️ Post-wake silence timeout (8s). Disengaging..."
+                )
+
+                self.listening_session_active = False
+
+                self.interrupted_session = False
+
+                self.state_machine.reset()
 
                 return
 

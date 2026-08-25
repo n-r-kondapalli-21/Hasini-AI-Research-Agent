@@ -15,6 +15,9 @@ from .test.test_response import TEST_RESPONSE
 from main import create_research_agent, Agent_stream
 from services.conversation_memory import ConversationMemory
 
+from .confirmation_listener import VoiceConfirmationListener
+from .confirmation import ConfirmationManager
+
 
 def is_exit_command(text: str) -> bool:
     """
@@ -273,11 +276,9 @@ async def process_voice_command(
         await audio_queue.wait_until_finished()
 
 
-async def voice_loop(agent):
+async def voice_loop(agent,vad,confirmation_manager):
 
     print("\n🧠 Loading voice components...")
-
-    vad = create_vad_provider()
 
     stt = create_stt_provider()
 
@@ -398,15 +399,51 @@ async def voice_loop(agent):
 async def main():
 
     print("=" * 50)
-    print("🤖 Hasini Phase 2 Voice Mode")
+    print("🤖 Hasini Phase 4 Voice Mode")
     print("=" * 50)
 
     print(
-        "\nConnecting to agent..."
+        "\n🧠 Loading voice components..."
     )
 
+    # --------------------------------------------------
+    # Create VAD first.
+    # The same VAD is used for normal commands and
+    # permission confirmations.
+    # --------------------------------------------------
+
+    vad = create_vad_provider()
+    tts = create_tts_provider()
+
+    # --------------------------------------------------
+    # Confirmation listener
+    # --------------------------------------------------
+
+    confirmation_listener = VoiceConfirmationListener(
+        vad,
+        tts=tts,
+    )
+
+    confirmation_manager = ConfirmationManager(
+        listen_callback=confirmation_listener.listen,
+        speak_callback=confirmation_listener.speak,
+        timeout_seconds=15,
+    )
+
+    print(
+        "\n🧠 Creating research agent..."
+    )
+
+    # --------------------------------------------------
+    # Create the agent AFTER the confirmation manager
+    # exists, so gated tools can use CONFIRM_WAIT.
+    # --------------------------------------------------
+
     agent, mcp_client, all_tools = (
-        await create_research_agent()
+        await create_research_agent(
+            confirmation_manager=confirmation_manager,
+            mode="voice",
+        )
     )
 
     print(
@@ -423,7 +460,11 @@ async def main():
 
     try:
 
-        await voice_loop(agent)
+        await voice_loop(
+            agent,
+            vad,
+            confirmation_manager,
+        )
 
     except (
         KeyboardInterrupt,
