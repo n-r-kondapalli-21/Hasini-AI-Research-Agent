@@ -10,6 +10,7 @@ from .segmenter import ResponseSegmenter
 from .audio_queue import OrderedAudioQueue
 
 from .config import MAX_RECORD_SECONDS, VOICE_TEST_MODE
+from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
 from .test.test_response import TEST_RESPONSE
 
 from main import create_research_agent, Agent_stream
@@ -285,8 +286,8 @@ async def voice_loop(agent,vad,confirmation_manager):
     tts = create_tts_provider()
     
     memory = ConversationMemory(
-        history_limit=10,
-        enabled=True,
+        history_limit=MEMORY_HISTORY_LIMIT,
+        enabled=MEMORY_ENABLED,
     )
 
     audio_queue = OrderedAudioQueue()

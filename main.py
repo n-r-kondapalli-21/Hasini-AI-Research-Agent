@@ -10,10 +10,13 @@ from permission_registry import discover_permissions
 from tool_commands import handle_tool_command
 from services.conversation_memory import ConversationMemory
 from permission_gated_tool import create_permission_gated_tool
+from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
 from permission_registry import (
     discover_permissions,
     resolve_tool_server,
 )
+from langchain_core.messages import AIMessage, AIMessageChunk
+from voice.confirmation import ConfirmationRejected, ConfirmationTimeout
 
 
 async def create_research_agent(confirmation_manager=None, mode: str = "text"):
@@ -52,49 +55,116 @@ async def create_research_agent(confirmation_manager=None, mode: str = "text"):
     return agent, mcp_client, all_tools
 
 
-from langchain_core.messages import AIMessage, AIMessageChunk
-from voice.confirmation import ConfirmationRejected, ConfirmationTimeout
-
 # Phase 2 streaming function
 async def Agent_stream(query, agent, memory):
     """
     Stream agent response token-by-token.
 
-    Yields:
-        Text chunks as they are generated.
+    Memory behavior:
+
+    Memory enabled:
+        Previous conversation history + current query
+        are sent to the agent.
+
+    Memory disabled:
+        Only the current user query is sent.
+
+    The current query must ALWAYS be sent to the agent,
+    regardless of whether conversation memory is enabled.
     """
+
+    # --------------------------------------------------
+    # Add current user message to memory.
+    #
+    # If memory is disabled, ConversationMemory ignores
+    # this operation.
+    # --------------------------------------------------
 
     memory.add_user_message(query)
 
     full_response = ""
 
     try:
+
+        # --------------------------------------------------
+        # Get conversation history.
+        # --------------------------------------------------
+
+        messages = memory.get_history()
+
+        # --------------------------------------------------
+        # IMPORTANT:
+        #
+        # If memory is disabled, messages will be empty.
+        # We STILL need to send the current user query.
+        # --------------------------------------------------
+
+        if not messages:
+
+            messages = [
+                {
+                    "role": "user",
+                    "content": query,
+                }
+            ]
+
+        # --------------------------------------------------
+        # Stream agent response
+        # --------------------------------------------------
+
         async for chunk in agent.astream(
-            {"messages": memory.get_history()},
+            {"messages": messages},
             stream_mode="messages",
         ):
+
             message, metadata = chunk
 
             if not message:
                 continue
 
             # --------------------------------------------------
-            # LangChain Message-Level Filtering:
-            #
-            # Only yield assistant/AI messages (AIMessage/AIMessageChunk).
-            # Ignore tool messages (ToolMessage), raw tool outputs,
-            # directory listings, and internal results.
+            # Only process AI/assistant messages.
+            # Ignore tool messages and internal messages.
             # --------------------------------------------------
-            msg_type = getattr(message, "type", "")
-            if not isinstance(message, (AIMessage, AIMessageChunk)) and msg_type not in {"ai", "assistant"}:
+
+            msg_type = getattr(
+                message,
+                "type",
+                "",
+            )
+
+            if (
+                not isinstance(
+                    message,
+                    (
+                        AIMessage,
+                        AIMessageChunk,
+                    ),
+                )
+                and msg_type not in {
+                    "ai",
+                    "assistant",
+                }
+            ):
                 continue
 
-            content = getattr(message, "content", "")
+            # --------------------------------------------------
+            # Extract content
+            # --------------------------------------------------
+
+            content = getattr(
+                message,
+                "content",
+                "",
+            )
 
             if not content:
                 continue
 
-            # Some providers can return structured content.
+            # --------------------------------------------------
+            # Handle structured content
+            # --------------------------------------------------
+
             if isinstance(content, list):
 
                 text_parts = []
@@ -103,7 +173,10 @@ async def Agent_stream(query, agent, memory):
 
                     if isinstance(item, dict):
 
-                        text = item.get("text", "")
+                        text = item.get(
+                            "text",
+                            "",
+                        )
 
                         if text:
                             text_parts.append(text)
@@ -112,25 +185,64 @@ async def Agent_stream(query, agent, memory):
 
                         text_parts.append(item)
 
-                content = "".join(text_parts)
+                content = "".join(
+                    text_parts
+                )
 
             if not content:
                 continue
 
+            # --------------------------------------------------
+            # Accumulate complete response
+            # --------------------------------------------------
+
             full_response += content
+
+            # --------------------------------------------------
+            # Stream to caller
+            # --------------------------------------------------
 
             yield content
 
     except ConfirmationRejected:
-        print("\n🛑 Action cancelled by user.")
+
+        print(
+            "\n🛑 Action cancelled by user."
+        )
+
         return
+
     except ConfirmationTimeout:
-        print("\n⏱️ Confirmation timed out. Action cancelled.")
+
+        print(
+            "\n⏱️ Confirmation timed out. "
+            "Action cancelled."
+        )
+
         return
+
+    except Exception as e:
+
+        print(
+            f"\n❌ Agent response error: {e}"
+        )
+
+        return
+
     finally:
-        # Save the complete response only after streaming finishes successfully.
+
+        # --------------------------------------------------
+        # Only add the assistant response to memory when
+        # memory is enabled.
+        #
+        # ConversationMemory handles this internally.
+        # --------------------------------------------------
+
         if full_response:
-            memory.add_assistant_message(full_response)
+
+            memory.add_assistant_message(
+                full_response
+            )
 
 
 async def main():
@@ -138,8 +250,8 @@ async def main():
     agent, mcp_client, all_tools = await create_research_agent()
 
     memory = ConversationMemory(
-        history_limit=10,
-        enabled=True,
+        history_limit=MEMORY_HISTORY_LIMIT,
+        enabled=MEMORY_ENABLED,
     )
 
     print("=" * 50)

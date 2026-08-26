@@ -9,6 +9,8 @@ from services.conversation_memory import (
     ConversationMemory,
 )
 
+from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
+
 from .audio_capture import AudioCapture
 from .audio_broadcaster import AudioBroadcaster
 from .audio_queue import OrderedAudioQueue
@@ -105,8 +107,8 @@ async def main():
     )
 
     memory = ConversationMemory(
-        history_limit=10,
-        enabled=True,
+        history_limit=MEMORY_HISTORY_LIMIT,
+        enabled=MEMORY_ENABLED,
     )
 
     # ==================================================

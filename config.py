@@ -52,3 +52,16 @@ if not github_token:
     raise ValueError(
         "GITHUB_PERSONAL_ACCESS_TOKEN is missing from .env"
     )
+
+# ============================================================
+# Conversation Memory
+# ============================================================
+
+# Set to False to disable conversation history entirely.
+MEMORY_ENABLED = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
+
+# Maximum number of messages (user + assistant) to keep in memory.
+MEMORY_HISTORY_LIMIT = int(os.getenv("MEMORY_HISTORY_LIMIT", "10"))
+
+if MEMORY_HISTORY_LIMIT < 2:
+    raise ValueError("MEMORY_HISTORY_LIMIT must be at least 2. Check in .env file")
