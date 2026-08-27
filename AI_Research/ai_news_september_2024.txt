@@ -1,5 +1,0 @@
-1. Grok launches AI image generator with a NSFW 'spicy mode' (August 5, 2025) - Tom's Guide
-2. OpenAI releases GPT-5, calling it a 'team of Ph.D. level experts in your pocket' (August 8, 2025) - NBC News
-3. MIT study finds 95% of AI projects deliver zero returns despite $30-40B spending (August 22, 2025)
-4. Appian rolls out latest platform release with enterprise-ready AI capabilities (August 22, 2025)
-5. Google unveils Veo 3 at Google I/O 2025 with further refinements announced in August 2025
