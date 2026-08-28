@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,9 @@ from ...config import (
 from .base import VADProvider
 
 
+logger = logging.getLogger(__name__)
+
+
 class SileroVAD(VADProvider):
     """
     Local Silero VAD provider.
@@ -24,34 +28,51 @@ class SileroVAD(VADProvider):
     """
 
     def __init__(self):
-
-        print("\n🧠 Loading Silero VAD...")
-
         self.model_path = Path(VAD_MODEL)
 
         self.threshold = VAD_THRESHOLD
         self.min_silence_ms = VAD_MIN_SILENCE_MS
         self.speech_pad_ms = VAD_SPEECH_PAD_MS
 
+        self.session = None
+
+        logger.info("Loading Silero VAD...")
+        logger.info("Model: %s", self.model_path)
+
+        self._validate_model()
+        self._load_model()
+
+        self.reset()
+
+        logger.info("Silero VAD ready.")
+
+    def _validate_model(self) -> None:
+        """Validate that the configured VAD model exists."""
         if not self.model_path.is_file():
+            logger.error(
+                "Silero VAD model not found: %s",
+                self.model_path,
+            )
             raise FileNotFoundError(
                 f"Silero VAD model not found:\n"
                 f"{self.model_path}"
             )
 
-        self.session = ort.InferenceSession(
-            str(self.model_path),
-            providers=[
-                "CPUExecutionProvider"
-            ],
-        )
-
-        self.reset()
-
-        print("✅ Silero VAD ready.")
-        print(
-            f"Model: {self.model_path}"
-        )
+    def _load_model(self) -> None:
+        """Create the ONNX Runtime inference session."""
+        try:
+            self.session = ort.InferenceSession(
+                str(self.model_path),
+                providers=[
+                    "CPUExecutionProvider"
+                ],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to load Silero VAD model: %s",
+                self.model_path,
+            )
+            raise
 
     def reset(self):
         """
@@ -69,9 +90,7 @@ class SileroVAD(VADProvider):
         )
 
         self.speech_started = False
-
         self.silence_samples = 0
-
         self.last_probability = 0.0
 
     def _predict(self, audio_frame):
@@ -79,44 +98,60 @@ class SileroVAD(VADProvider):
         Run one inference step.
         """
 
-        audio = np.asarray(
-            audio_frame,
-            dtype=np.float32,
-        )
+        if self.session is None:
+            raise RuntimeError(
+                "Silero VAD session is not initialized."
+            )
 
-        if audio.size == 0:
-            return 0.0
+        try:
+            audio = np.asarray(
+                audio_frame,
+                dtype=np.float32,
+            )
 
-        audio = audio.reshape(
-            1,
-            -1,
-        )
+            if audio.size == 0:
+                return 0.0
 
-        outputs = self.session.run(
-            None,
-            {
-                "input": audio,
-                "sr": np.array(
-                    INPUT_SAMPLE_RATE,
-                    dtype=np.int64,
-                ),
-                "h": self.h,
-                "c": self.c,
-            },
-        )
+            audio = audio.reshape(
+                1,
+                -1,
+            )
 
-        probability = float(
-            outputs[0][0][0]
-        )
+            outputs = self.session.run(
+                None,
+                {
+                    "input": audio,
+                    "sr": np.array(
+                        INPUT_SAMPLE_RATE,
+                        dtype=np.int64,
+                    ),
+                    "h": self.h,
+                    "c": self.c,
+                },
+            )
 
-        self.h = outputs[1]
-        self.c = outputs[2]
+            probability = float(
+                outputs[0][0][0]
+            )
 
-        self.last_probability = probability
+            self.h = outputs[1]
+            self.c = outputs[2]
 
-        return probability
+            self.last_probability = probability
 
-    def process(self, audio_frame, min_silence_ms: float | None = None):
+            return probability
+
+        except Exception:
+            logger.exception(
+                "Silero VAD inference failed."
+            )
+            raise
+
+    def process(
+        self,
+        audio_frame,
+        min_silence_ms: float | None = None,
+    ):
         """
         Process an audio frame.
 
@@ -161,10 +196,13 @@ class SileroVAD(VADProvider):
             is_speech
             and not self.speech_started
         ):
-
             self.speech_started = True
-
             self.silence_samples = 0
+
+            logger.debug(
+                "Speech started. Probability: %.3f",
+                probability,
+            )
 
             return {
                 "start": True,
@@ -179,7 +217,6 @@ class SileroVAD(VADProvider):
             is_speech
             and self.speech_started
         ):
-
             self.silence_samples = 0
 
             return {
@@ -195,7 +232,6 @@ class SileroVAD(VADProvider):
             not is_speech
             and self.speech_started
         ):
-
             self.silence_samples += (
                 frame_samples
             )
@@ -210,10 +246,13 @@ class SileroVAD(VADProvider):
                 silence_ms
                 >= effective_min_silence
             ):
-
                 self.speech_started = False
-
                 self.silence_samples = 0
+
+                logger.debug(
+                    "Speech ended. Probability: %.3f",
+                    probability,
+                )
 
                 return {
                     "end": True,
@@ -222,7 +261,10 @@ class SileroVAD(VADProvider):
 
         return None
 
-    def is_speech(self, audio_frame) -> bool:
+    def is_speech(
+        self,
+        audio_frame,
+    ) -> bool:
         """
         Return whether the current frame contains
         speech according to the VAD threshold.
@@ -236,8 +278,11 @@ class SileroVAD(VADProvider):
             probability
             >= self.threshold
         )
-    
-    def process_probability(self,audio_frame: np.ndarray,) -> float:
+
+    def process_probability(
+        self,
+        audio_frame: np.ndarray,
+    ) -> float:
         """
         Return the raw Silero speech probability.
 

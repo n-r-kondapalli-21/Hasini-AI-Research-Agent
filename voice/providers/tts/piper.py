@@ -1,17 +1,11 @@
+import logging
+import os
 import subprocess
 import sys
-import os
 import time
-
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
 import numpy as np
 import soundfile as sf
-
 from piper import PiperVoice
 
 from ...config import (
@@ -22,96 +16,185 @@ from ...config import (
 from .base import TTSProvider
 
 
+logger = logging.getLogger(__name__)
+
+
 class PiperTTS(TTSProvider):
     """
     Piper Text-to-Speech provider.
+
+    Supports both file-based synthesis and streaming synthesis.
     """
 
     def __init__(self):
-
         self.model = PIPER_MODEL
         self.output_file = PIPER_OUTPUT_FILE
+        self.voice = None
 
-        output_directory = os.path.dirname(
-            self.output_file
-        )
+        self._prepare_output_directory()
+        self._validate_model()
+        self._load_voice()
 
-        if output_directory:
+    def _prepare_output_directory(self) -> None:
+        """Create the TTS output directory if it does not exist."""
+        output_directory = os.path.dirname(self.output_file)
+
+        if not output_directory:
+            return
+
+        try:
             os.makedirs(
                 output_directory,
                 exist_ok=True,
             )
+        except OSError:
+            logger.exception(
+                "Failed to create Piper output directory: %s",
+                output_directory,
+            )
+            raise
 
+    def _validate_model(self) -> None:
+        """Verify that the configured Piper model exists."""
         if not os.path.isfile(self.model):
+            logger.error(
+                "Piper model not found: %s",
+                self.model,
+            )
             raise FileNotFoundError(
                 f"Piper model not found:\n{self.model}"
             )
 
-        print("\n🔊 Loading Piper voice...")
+    def _load_voice(self) -> None:
+        """Load the Piper voice model."""
+        logger.info("Loading Piper voice...")
+        logger.info("Voice: %s", self.model)
 
-        start = time.perf_counter()
+        start_time = time.perf_counter()
 
-        self.voice = PiperVoice.load(
-            self.model
-        )
+        try:
+            self.voice = PiperVoice.load(self.model)
 
-        load_time = time.perf_counter() - start
+        except Exception:
+            load_time = time.perf_counter() - start_time
 
-        print(
-            f"✅ Piper voice loaded in "
-            f"{load_time:.2f} seconds."
-        )
+            logger.exception(
+                "Failed to load Piper voice '%s' after %.2f seconds.",
+                self.model,
+                load_time,
+            )
+            raise
 
-        print(
-            f"Voice: {self.model}"
+        load_time = time.perf_counter() - start_time
+
+        logger.info(
+            "Piper voice loaded successfully in %.2f seconds.",
+            load_time,
         )
 
     def synthesize(self, text: str):
+        """
+        Synthesize text into an audio array.
+
+        Returns:
+            tuple:
+                (audio, sample_rate)
+
+        Returns (None, None) when the input text is empty.
+        """
 
         if not text or not text.strip():
+            logger.debug("Skipping TTS synthesis because text is empty.")
             return None, None
 
-        process = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "piper",
-                "--model",
-                self.model,
-                "--output_file",
-                self.output_file,
-            ],
-            input=text,
-            text=True,
-            capture_output=True,
-        )
-
-        if process.returncode != 0:
-            raise RuntimeError(
-                f"Piper TTS failed:\n"
-                f"{process.stderr}"
+        try:
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "piper",
+                    "--model",
+                    self.model,
+                    "--output_file",
+                    self.output_file,
+                ],
+                input=text,
+                text=True,
+                capture_output=True,
             )
 
-        audio, sample_rate = sf.read(
-            self.output_file,
-            dtype="float32",
+        except OSError:
+            logger.exception(
+                "Failed to start Piper TTS process."
+            )
+            raise
+
+        if process.returncode != 0:
+            stderr = process.stderr.strip()
+
+            logger.error(
+                "Piper TTS process failed with exit code %d. Error: %s",
+                process.returncode,
+                stderr or "No error output.",
+            )
+
+            raise RuntimeError(
+                f"Piper TTS failed:\n"
+                f"{stderr or 'No error output.'}"
+            )
+
+        try:
+            audio, sample_rate = sf.read(
+                self.output_file,
+                dtype="float32",
+            )
+
+        except Exception:
+            logger.exception(
+                "Failed to read generated Piper audio file: %s",
+                self.output_file,
+            )
+            raise
+
+        logger.debug(
+            "Piper synthesis completed successfully. "
+            "Sample rate: %s",
+            sample_rate,
         )
 
         return audio, sample_rate
 
     def synthesize_stream(self, text: str):
+        """
+        Stream synthesized audio chunks from the loaded Piper voice.
+        """
 
         if not text or not text.strip():
+            logger.debug(
+                "Skipping streaming TTS because text is empty."
+            )
             return
 
-        for chunk in self.voice.synthesize(text):
+        if self.voice is None:
+            raise RuntimeError(
+                "Piper voice is not initialized."
+            )
 
-            audio = chunk.audio_float_array
+        try:
+            for chunk in self.voice.synthesize(text):
+                audio = chunk.audio_float_array
 
-            if audio is None:
-                continue
+                if audio is None:
+                    continue
 
-            if len(audio) == 0:
-                continue
+                if len(audio) == 0:
+                    continue
 
-            yield audio, chunk.sample_rate
+                yield audio, chunk.sample_rate
+
+        except Exception:
+            logger.exception(
+                "Piper streaming synthesis failed."
+            )
+            raise
+

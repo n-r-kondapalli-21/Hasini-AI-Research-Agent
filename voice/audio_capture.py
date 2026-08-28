@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import threading
 
 import sounddevice as sd
@@ -9,6 +10,9 @@ from .config import (
     AUDIO_DEVICE,
     VAD_FRAME_SAMPLES,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AudioCapture:
@@ -26,17 +30,13 @@ class AudioCapture:
     """
 
     def __init__(self, queue_size=100):
-
         self.queue = asyncio.Queue(
             maxsize=queue_size
         )
 
         self.stream = None
-
         self.loop = None
-
         self.thread = None
-
         self.running = False
 
         self._stop_event = threading.Event()
@@ -46,14 +46,14 @@ class AudioCapture:
     # --------------------------------------------------
 
     async def start(self):
-
         if self.running:
+            logger.debug(
+                "Audio capture is already running."
+            )
             return
 
         self.loop = asyncio.get_running_loop()
-
         self._stop_event.clear()
-
         self.running = True
 
         self.thread = threading.Thread(
@@ -62,18 +62,27 @@ class AudioCapture:
             name="HasiniAudioCapture",
         )
 
-        self.thread.start()
+        try:
+            self.thread.start()
+        except Exception:
+            self.running = False
+            self.thread = None
 
-        print("🎤 Continuous microphone capture started.")
+            logger.exception(
+                "Failed to start microphone capture thread."
+            )
+            raise
+
+        logger.info(
+            "Continuous microphone capture started."
+        )
 
     # --------------------------------------------------
     # Capture thread
     # --------------------------------------------------
 
     def _capture_thread(self):
-
         try:
-
             self.stream = sd.InputStream(
                 samplerate=INPUT_SAMPLE_RATE,
                 channels=INPUT_CHANNELS,
@@ -84,93 +93,109 @@ class AudioCapture:
 
             self.stream.start()
 
-            while not self._stop_event.is_set():
+            logger.debug(
+                "Microphone stream opened successfully."
+            )
 
-                audio, overflowed = (
-                    self.stream.read(
-                        VAD_FRAME_SAMPLES
-                    )
+            while not self._stop_event.is_set():
+                audio, overflowed = self.stream.read(
+                    VAD_FRAME_SAMPLES
                 )
 
                 if overflowed:
-
-                    print(
-                        "⚠️ Microphone buffer overflow."
+                    logger.warning(
+                        "Microphone buffer overflow."
                     )
 
                 frame = audio.flatten().copy()
 
                 self._publish(frame)
 
-        except Exception as e:
-
-            print(
-                f"\n❌ Audio capture error: {e}"
+        except Exception:
+            logger.exception(
+                "Audio capture thread failed."
             )
-
             self.running = False
 
         finally:
-
-            if self.stream is not None:
-
-                try:
-                    self.stream.stop()
-                except Exception:
-                    pass
-
-                try:
-                    self.stream.close()
-                except Exception:
-                    pass
-
-                self.stream = None
-
+            self._close_stream()
             self.running = False
+
+    # --------------------------------------------------
+    # Stream cleanup
+    # --------------------------------------------------
+
+    def _close_stream(self):
+        """Stop and close the microphone stream safely."""
+
+        if self.stream is None:
+            return
+
+        try:
+            self.stream.stop()
+        except Exception:
+            logger.warning(
+                "Failed to stop microphone stream.",
+                exc_info=True,
+            )
+
+        try:
+            self.stream.close()
+        except Exception:
+            logger.warning(
+                "Failed to close microphone stream.",
+                exc_info=True,
+            )
+
+        self.stream = None
 
     # --------------------------------------------------
     # Publish frame into asyncio
     # --------------------------------------------------
 
     def _publish(self, frame):
-
         if self.loop is None:
             return
 
-        self.loop.call_soon_threadsafe(
-            self._put_frame,
-            frame,
-        )
+        try:
+            self.loop.call_soon_threadsafe(
+                self._put_frame,
+                frame,
+            )
+        except RuntimeError:
+            logger.debug(
+                "Unable to publish audio frame because "
+                "the asyncio event loop is no longer running."
+            )
 
     def _put_frame(self, frame):
-
         if not self.running:
             return
 
         if self.queue.full():
-
             # Drop the oldest frame rather than allowing
             # microphone capture to block indefinitely.
             try:
                 self.queue.get_nowait()
             except asyncio.QueueEmpty:
-                pass
+                logger.debug(
+                    "Audio queue was empty while dropping old frame."
+                )
 
         try:
-
-            self.queue.put_nowait(
-                frame
-            )
+            self.queue.put_nowait(frame)
 
         except asyncio.QueueFull:
-            pass
+            # Queue may become full between full() and put_nowait().
+            logger.debug(
+                "Dropped audio frame because the queue is full."
+            )
 
     # --------------------------------------------------
     # Read one frame
     # --------------------------------------------------
 
     async def get_frame(self):
-
         return await self.queue.get()
 
     # --------------------------------------------------
@@ -178,31 +203,33 @@ class AudioCapture:
     # --------------------------------------------------
 
     async def stop(self):
-
         if not self.running:
             return
 
-        print(
-            "🛑 Stopping microphone capture..."
+        logger.info(
+            "Stopping microphone capture..."
         )
 
         self.running = False
-
         self._stop_event.set()
 
         if self.thread is not None:
-
-            await asyncio.to_thread(
-                self.thread.join,
-                2.0,
-            )
+            try:
+                await asyncio.to_thread(
+                    self.thread.join,
+                    2.0,
+                )
+            except Exception:
+                logger.exception(
+                    "Error while waiting for microphone "
+                    "capture thread to stop."
+                )
 
         self.thread = None
-
         self._clear_queue()
 
-        print(
-            "🎤 Microphone capture stopped."
+        logger.info(
+            "Microphone capture stopped."
         )
 
     # --------------------------------------------------
@@ -210,9 +237,7 @@ class AudioCapture:
     # --------------------------------------------------
 
     def _clear_queue(self):
-
         while True:
-
             try:
                 self.queue.get_nowait()
             except asyncio.QueueEmpty:

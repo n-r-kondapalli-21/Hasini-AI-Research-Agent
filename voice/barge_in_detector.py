@@ -1,25 +1,16 @@
 import asyncio
-import sys
+import logging
 import time
-
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
 import numpy as np
 
 from .audio_broadcaster import AudioBroadcaster
-
 from .state_machine import (
     VoiceEvent,
     VoiceState,
     VoiceStateMachine,
 )
-
 from .providers.vad.base import VADProvider
-
 from .config import (
     BARGE_IN_VAD_THRESHOLD,
     BARGE_IN_REQUIRED_SPEECH_FRAMES,
@@ -28,15 +19,14 @@ from .config import (
 )
 
 
+logger = logging.getLogger("hasini.voice.barge_in")
+
+
 class BargeInDetector:
     """
-    Conservative speech detector used only while Hasini
-    is speaking.
+    Conservative speech detector used only while Hasini is speaking.
 
-    Normal command VAD and barge-in VAD intentionally have
-    different sensitivity requirements.
-
-    Barge-in pipeline:
+    Pipeline:
 
         microphone frame
               ↓
@@ -44,7 +34,7 @@ class BargeInDetector:
               ↓
        Silero probability
               ↓
-       0.85 threshold
+       threshold check
               ↓
       sustained speech
               ↓
@@ -60,320 +50,256 @@ class BargeInDetector:
         state_machine: VoiceStateMachine,
         agent_controller,
     ):
-
         self.broadcaster = broadcaster
-
         self.vad = vad
-
         self.state_machine = state_machine
-
         self.agent_controller = agent_controller
 
         self.queue = broadcaster.subscribe()
 
         self.running = False
+        self.task: asyncio.Task | None = None
 
-        self.task = None
-
-        # --------------------------------------------------
         # Detection state
-        # --------------------------------------------------
-
         self.speech_frames = 0
-
         self.interrupt_triggered = False
 
-        # --------------------------------------------------
         # Speaking timing
-        # --------------------------------------------------
+        self.speaking_started_at: float | None = None
 
-        self.speaking_started_at = None
-
-    # ============================================================
-    # START
-    # ============================================================
-
-    async def start(self):
-
+    async def start(self) -> None:
+        """Start the barge-in detector."""
         if self.running:
+            logger.debug("Barge-in detector is already running.")
             return
 
         self.running = True
 
-        self.task = asyncio.create_task(
-            self._listen_loop()
-        )
+        try:
+            self.task = asyncio.create_task(
+                self._listen_loop(),
+                name="barge-in-detector",
+            )
+        except Exception:
+            self.running = False
+            logger.exception("Failed to create barge-in detector task.")
+            raise
 
-        print(
-            "👂 Barge-in detector started."
-        )
-
-    # ============================================================
-    # RMS
-    # ============================================================
+        logger.info("Barge-in detector started.")
 
     @staticmethod
-    def _rms(
-        frame: np.ndarray,
-    ) -> float:
-        """
-        Calculate RMS microphone energy.
-        """
-
+    def _rms(frame: np.ndarray) -> float:
+        """Calculate RMS microphone energy."""
         if frame is None or len(frame) == 0:
-
             return 0.0
 
-        frame = frame.astype(
-            np.float32,
-            copy=False,
-        )
+        try:
+            frame = frame.astype(np.float32, copy=False)
 
-        return float(
-            np.sqrt(
-                np.mean(
-                    np.square(frame)
+            return float(
+                np.sqrt(
+                    np.mean(
+                        np.square(frame)
+                    )
                 )
             )
-        )
+        except Exception:
+            logger.exception("Failed to calculate microphone RMS.")
+            return 0.0
 
-    # ============================================================
-    # RESET DETECTION
-    # ============================================================
-
-    def _reset_detection(self):
-
+    def _reset_detection(self) -> None:
+        """Reset sustained speech detection."""
         self.speech_frames = 0
 
-    # ============================================================
-    # LISTEN LOOP
-    # ============================================================
+    def _reset_session_state(self) -> None:
+        """Reset all state associated with the current speaking session."""
+        self._reset_detection()
+        self.interrupt_triggered = False
+        self.speaking_started_at = None
 
-    async def _listen_loop(self):
-
+    async def _listen_loop(self) -> None:
+        """Continuously monitor microphone audio for user interruption."""
         try:
-
             while self.running:
-
                 frame = await self.queue.get()
 
                 # --------------------------------------------------
                 # Only monitor microphone during SPEAKING.
                 # --------------------------------------------------
-
-                if (
-                    self.state_machine.state
-                    != VoiceState.SPEAKING
-                ):
-
-                    self._reset_detection()
-
-                    self.interrupt_triggered = False
-
-                    self.speaking_started_at = None
-
+                if self.state_machine.state != VoiceState.SPEAKING:
+                    self._reset_session_state()
                     continue
 
                 # --------------------------------------------------
                 # Start timing the current speaking session.
                 # --------------------------------------------------
-
                 if self.speaking_started_at is None:
-
-                    self.speaking_started_at = (
-                        time.monotonic()
-                    )
-
+                    self.speaking_started_at = time.monotonic()
                     self._reset_detection()
-
                     continue
 
                 # --------------------------------------------------
                 # Grace period after TTS starts.
                 # --------------------------------------------------
-
                 elapsed = (
                     time.monotonic()
                     - self.speaking_started_at
                 )
 
-                if (
-                    elapsed
-                    <
-                    BARGE_IN_GRACE_PERIOD_MS
-                    / 1000.0
-                ):
+                grace_period_seconds = (
+                    BARGE_IN_GRACE_PERIOD_MS / 1000.0
+                )
 
+                if elapsed < grace_period_seconds:
                     self._reset_detection()
-
                     continue
 
                 # --------------------------------------------------
                 # RMS energy gate.
                 # --------------------------------------------------
-
                 rms = self._rms(frame)
 
                 if rms < BARGE_IN_MIN_RMS:
-
                     self._reset_detection()
-
                     continue
 
                 # --------------------------------------------------
                 # Get RAW Silero probability.
                 # --------------------------------------------------
-
                 try:
-
-                    probability = (
-                        self.vad
-                        .process_probability(
-                            frame
-                        )
-                    )
+                    probability = self.vad.process_probability(frame)
 
                 except AttributeError:
-
-                    print(
-                        "\n❌ Barge-in VAD provider "
-                        "does not expose "
-                        "process_probability()."
-                    )
-
-                    print(
-                        "Add process_probability() "
-                        "to the Silero VAD provider."
+                    logger.error(
+                        "Barge-in VAD provider does not expose "
+                        "process_probability(). "
+                        "Add process_probability() to the Silero "
+                        "VAD provider."
                     )
 
                     self.running = False
-
                     break
 
-                # --------------------------------------------------
-                # Debug output.
-                #
-                # Uncomment when tuning.
-                # --------------------------------------------------
+                except Exception:
+                    logger.exception(
+                        "Barge-in VAD probability processing failed."
+                    )
+                    self._reset_detection()
+                    continue
 
-                print(
-                    f"Barge VAD | "
-                    f"prob={probability:.3f} | "
-                    f"rms={rms:.4f} | "
-                    f"frames={self.speech_frames}"
+                # --------------------------------------------------
+                # Per-frame debug information.
+                #
+                # DEBUG keeps normal terminal output clean.
+                # Enable DEBUG logging when tuning the detector.
+                # --------------------------------------------------
+                logger.debug(
+                    "Barge VAD | prob=%.3f | rms=%.4f | frames=%d",
+                    probability,
+                    rms,
+                    self.speech_frames,
                 )
 
                 # --------------------------------------------------
                 # Speech probability threshold.
                 # --------------------------------------------------
-
-                if (
-                    probability
-                    >= BARGE_IN_VAD_THRESHOLD
-                ):
-
+                if probability >= BARGE_IN_VAD_THRESHOLD:
                     self.speech_frames += 1
-
                 else:
-
-                    # Any weak frame breaks the
-                    # sustained-speech requirement.
+                    # Any weak frame breaks sustained speech.
                     self._reset_detection()
 
                 # --------------------------------------------------
                 # Confirm sustained speech.
                 # --------------------------------------------------
-
                 if (
                     self.speech_frames
                     >= BARGE_IN_REQUIRED_SPEECH_FRAMES
                     and not self.interrupt_triggered
                 ):
-
                     self.interrupt_triggered = True
 
-                    print(
-                        "\n🛑 BARGE-IN: "
-                        "Confirmed user speech."
-                    )
-
-                    print(
-                        f"   Probability: "
-                        f"{probability:.3f}"
-                    )
-
-                    print(
-                        f"   RMS: "
-                        f"{rms:.4f}"
-                    )
-
-                    print(
-                        f"   Speech frames: "
-                        f"{self.speech_frames}"
+                    logger.info(
+                        "BARGE-IN confirmed: user speech detected "
+                        "(prob=%.3f, rms=%.4f, frames=%d).",
+                        probability,
+                        rms,
+                        self.speech_frames,
                     )
 
                     # --------------------------------------------------
                     # SPEAKING → USER_INTERRUPT
                     # --------------------------------------------------
-
-                    self.state_machine.handle_event(
-                        VoiceEvent.USER_SPEECH
-                    )
+                    try:
+                        self.state_machine.handle_event(
+                            VoiceEvent.USER_SPEECH
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to transition state machine "
+                            "after barge-in detection."
+                        )
+                        self._reset_detection()
+                        continue
 
                     # --------------------------------------------------
                     # Cancel active response.
                     # --------------------------------------------------
+                    try:
+                        asyncio.create_task(
+                            self.agent_controller.cancel_response(),
+                            name="cancel-agent-response",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to schedule agent response cancellation."
+                        )
 
-                    asyncio.create_task(
-                        self.agent_controller
-                        .cancel_response()
-                    )
-
-                    self.vad.reset()
+                    # --------------------------------------------------
+                    # Reset VAD state.
+                    # --------------------------------------------------
+                    try:
+                        self.vad.reset()
+                    except Exception:
+                        logger.exception(
+                            "Failed to reset barge-in VAD."
+                        )
 
                     self._reset_detection()
 
         except asyncio.CancelledError:
+            logger.debug("Barge-in detector task cancelled.")
+            raise
 
-            pass
+        except Exception:
+            logger.exception("Unexpected error in barge-in detector loop.")
 
-        except Exception as e:
+        finally:
+            logger.debug("Barge-in detector listen loop exited.")
 
-            print(
-                f"\n❌ Barge-in detector error: {e}"
-            )
-
-    # ============================================================
-    # STOP
-    # ============================================================
-
-    async def stop(self):
-
-        if not self.running:
+    async def stop(self) -> None:
+        """Stop the barge-in detector and clean up its task."""
+        if not self.running and self.task is None:
+            logger.debug("Barge-in detector is already stopped.")
             return
 
         self.running = False
 
-        if self.task is not None:
-
-            self.task.cancel()
-
-            try:
-
-                await self.task
-
-            except asyncio.CancelledError:
-
-                pass
-
+        task = self.task
         self.task = None
 
-        self._reset_detection()
+        if task is not None:
+            task.cancel()
 
-        self.interrupt_triggered = False
+            try:
+                await task
+            except asyncio.CancelledError:
+                logger.debug("Barge-in detector task cancelled successfully.")
+            except Exception:
+                logger.exception(
+                    "Error while stopping barge-in detector task."
+                )
 
-        self.speaking_started_at = None
+        self._reset_session_state()
 
-        print(
-            "👂 Barge-in detector stopped."
-        )
+        logger.info("Barge-in detector stopped.")

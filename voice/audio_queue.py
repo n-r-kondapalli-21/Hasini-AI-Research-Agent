@@ -1,7 +1,12 @@
 import asyncio
+import logging
+
 import numpy as np
 
 from .audio_io import play_audio, stop_audio
+
+
+logger = logging.getLogger(__name__)
 
 
 class OrderedAudioQueue:
@@ -172,6 +177,8 @@ class OrderedAudioQueue:
             self.play_loop()
         )
 
+        logger.debug("Audio playback loop started.")
+
     # ============================================================
     # PLAY LOOP
     # ============================================================
@@ -262,9 +269,9 @@ class OrderedAudioQueue:
                         and len(audio) > 0
                     ):
 
-                        print(
-                            f"🔊 Playing chunk "
-                            f"{current_index + 1}"
+                        logger.debug(
+                            "Playing audio chunk %d.",
+                            current_index + 1,
                         )
 
                         try:
@@ -284,9 +291,9 @@ class OrderedAudioQueue:
                                 generation
                             ):
 
-                                print(
-                                    f"✅ Finished chunk "
-                                    f"{current_index + 1}"
+                                logger.debug(
+                                    "Finished audio chunk %d.",
+                                    current_index + 1,
                                 )
 
                         except Exception as e:
@@ -302,8 +309,10 @@ class OrderedAudioQueue:
                                 generation
                             ):
 
-                                print(
-                                    f"⚠️ Audio playback error: {e}"
+                                logger.warning(
+                                    "Audio playback error for chunk %d: %s",
+                                    current_index + 1,
+                                    e,
                                 )
 
                 finally:
@@ -320,7 +329,7 @@ class OrderedAudioQueue:
                         self.condition.notify_all()
 
         except asyncio.CancelledError:
-
+            logger.debug("Audio playback loop cancelled.")
             raise
 
         finally:
@@ -330,6 +339,11 @@ class OrderedAudioQueue:
                 self.playing = False
 
                 self.condition.notify_all()
+
+        logger.debug(
+            "Audio queue reset for generation %s.",
+            self.generation,
+        )
 
     # ============================================================
     # WAIT
@@ -385,9 +399,7 @@ class OrderedAudioQueue:
         tasks cannot submit audio for the next response.
         """
 
-        print(
-            "🔇 Cancelling audio playback..."
-        )
+        logger.info("Cancelling audio playback...")
 
         async with self.condition:
 
@@ -435,6 +447,11 @@ class OrderedAudioQueue:
 
             self.condition.notify_all()
 
+        logger.debug(
+            "Audio playback cancelled. Generation invalidated to %d.",
+            self.generation,
+        )
+
     # ============================================================
     # CLOSE
     # ============================================================
@@ -473,7 +490,8 @@ class OrderedAudioQueue:
                 await self.playback_task
 
             except asyncio.CancelledError:
-
-                pass
+                logger.debug(
+                    "Audio playback task cancelled during close."
+                )
 
             self.playback_task = None

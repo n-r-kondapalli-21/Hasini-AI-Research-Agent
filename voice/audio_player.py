@@ -1,6 +1,10 @@
 import asyncio
+import logging
 
 from .audio_io import play_audio
+
+
+logger = logging.getLogger(__name__)
 
 
 class CancellableAudioPlayer:
@@ -10,7 +14,6 @@ class CancellableAudioPlayer:
     """
 
     def __init__(self):
-
         self.current_task = None
 
     async def play(
@@ -18,13 +21,9 @@ class CancellableAudioPlayer:
         audio,
         sample_rate,
     ):
-
-        self.current_task = (
-            asyncio.current_task()
-        )
+        self.current_task = asyncio.current_task()
 
         try:
-
             await asyncio.to_thread(
                 play_audio,
                 audio,
@@ -32,32 +31,41 @@ class CancellableAudioPlayer:
             )
 
         except asyncio.CancelledError:
+            logger.info("Audio playback cancelled.")
+            raise
 
-            print(
-                "🔇 Audio playback cancelled."
+        except Exception:
+            logger.exception(
+                "Audio playback failed."
             )
-
             raise
 
         finally:
-
             self.current_task = None
 
     async def cancel(self):
-
         if (
-            self.current_task is not None
-            and not self.current_task.done()
+            self.current_task is None
+            or self.current_task.done()
         ):
+            return
 
-            self.current_task.cancel()
+        logger.debug("Cancelling audio playback task.")
 
-            try:
+        self.current_task.cancel()
 
-                await self.current_task
+        try:
+            await self.current_task
 
-            except asyncio.CancelledError:
+        except asyncio.CancelledError:
+            logger.debug(
+                "Audio playback task cancelled successfully."
+            )
 
-                pass
+        except Exception:
+            logger.exception(
+                "Error while cancelling audio playback task."
+            )
 
+        finally:
             self.current_task = None

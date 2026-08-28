@@ -45,6 +45,10 @@ if not provider["api_key"]:
         f"{LLM_PROVIDER.upper()} API key is missing from .env"
     )
 
+
+Tavily_api_key=os.getenv("TAVILY_API_KEY")
+
+
 # GitHub token
 github_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")
 

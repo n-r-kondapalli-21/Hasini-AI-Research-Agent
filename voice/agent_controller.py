@@ -1,4 +1,6 @@
 import asyncio
+import logging
+
 import numpy as np
 
 from .config import VOICE_TEST_MODE
@@ -6,6 +8,9 @@ from .audio_queue import OrderedAudioQueue
 from .segmenter import ResponseSegmenter
 from .test.test_response import TEST_RESPONSE
 from .confirmation import ConfirmationRejected, ConfirmationTimeout
+
+logger = logging.getLogger("hasini.voice.agent_controller")
+
 
 from .state_machine import (
     VoiceEvent,
@@ -17,7 +22,7 @@ from .state_machine import (
 def _synthesize_blocking(
     tts,
     text,
-):
+) -> tuple[np.ndarray | None, int | None]:
     """
     Run TTS synthesis outside the asyncio event loop.
     """
@@ -55,7 +60,7 @@ async def synthesize_chunk(
     index,
     text,
     generation,
-):
+) -> None:
     """
     Synthesize one response segment.
 
@@ -110,9 +115,9 @@ async def synthesize_chunk(
 
     except Exception as e:
 
-        print(
-            f"\n❌ TTS chunk "
-            f"{index + 1} error: {e}"
+        logger.exception(
+            "TTS chunk %d failed.",
+            index + 1,
         )
 
         if audio_queue.is_generation_active(
@@ -216,16 +221,15 @@ class AgentController:
     # START
     # ============================================================
 
-    async def start(self):
+    async def start(self) -> None:
 
         if self.running:
+            logger.debug("Agent controller is already running.")
             return
 
         self.running = True
 
-        print(
-            "🧠 Agent controller started."
-        )
+        logger.info("Agent controller started.")
 
     # ============================================================
     # PROCESS
@@ -237,6 +241,7 @@ class AgentController:
     ):
 
         if not text or not text.strip():
+            logger.debug("Ignoring empty agent request.")
             return None
 
         if (
@@ -244,10 +249,9 @@ class AgentController:
             != VoiceState.THINKING
         ):
 
-            print(
-                "⚠️ Agent request ignored. "
-                f"Current state: "
-                f"{self.state_machine.state.name}"
+            logger.warning(
+                "Agent request ignored. Current state: %s",
+                self.state_machine.state.name,
             )
 
             return None
@@ -288,9 +292,7 @@ class AgentController:
 
             await self.audio_queue.start_playback()
 
-            print(
-                f"🧠 Thinking about: {text}"
-            )
+            logger.info("Processing command: %s", text)
 
             # ==================================================
             # STREAM AGENT RESPONSE
@@ -353,10 +355,10 @@ class AgentController:
                 if not chunk:
                     continue
 
-                print(
-                    f"\n🔊 Response chunk "
-                    f"{chunk_index + 1}: "
-                    f"{chunk}"
+                logger.debug(
+                    "Response chunk %d: %s",
+                    chunk_index + 1,
+                    chunk,
                 )
 
                 # --------------------------------------------------
@@ -405,9 +407,10 @@ class AgentController:
                 )
             ):
 
-                print(
-                    f"\n🔊 Final response chunk: "
-                    f"{final_chunk}"
+                logger.debug(
+                    "Final response chunk %d: %s",
+                    chunk_index + 1,
+                    final_chunk,
                 )
 
                 if (
@@ -443,9 +446,9 @@ class AgentController:
                 response_parts
             ).strip()
 
-            print(
-                f"\n🤖 Full response: "
-                f"{response}"
+            logger.info(
+                "Response generated successfully (%d characters).",
+                len(response),
             )
 
             # ==================================================
@@ -524,14 +527,14 @@ class AgentController:
             return response
 
         except asyncio.CancelledError:
-
+            logger.debug("Agent response task cancelled.")
             raise
 
         except (ConfirmationRejected, ConfirmationTimeout) as e:
 
-            print(
-                f"\n🛑 Action cancelled ({e.__class__.__name__}). "
-                "Stopping agent execution."
+            logger.warning(
+                "Action cancelled: %s",
+                e.__class__.__name__,
             )
 
             self.state_machine.reset()
@@ -540,9 +543,7 @@ class AgentController:
 
         except Exception as e:
 
-            print(
-                f"\n❌ Agent response error: {e}"
-            )
+            logger.exception("Agent response failed.")
 
             self.state_machine.reset()
 
@@ -565,11 +566,10 @@ class AgentController:
     # CANCEL RESPONSE
     # ============================================================
 
-    async def cancel_response(self):
+    async def cancel_response(self) -> None:
+        """Cancel the active response and return to listening state."""
 
-        print(
-            "\n🛑 Cancelling response..."
-        )
+        logger.info("Cancelling response...")
 
         # ==================================================
         # INVALIDATE CURRENT GENERATION FIRST
@@ -640,22 +640,31 @@ class AgentController:
         # CANCEL AUDIO PLAYBACK
         # ==================================================
 
-        await self.audio_queue.cancel(
-            cancelled_generation
-        )
+        try:
+            await self.audio_queue.cancel(
+                cancelled_generation
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Failed to cancel audio playback for generation %d.",
+                cancelled_generation,
+            )
+            raise
 
-        print(
-            "🎤 Response cancelled. "
-            "Listening for new command."
+        logger.info(
+            "Response cancelled. Listening for new command."
         )
 
     # ============================================================
     # STOP
     # ============================================================
 
-    async def stop(self):
+    async def stop(self) -> None:
 
         if not self.running:
+            logger.debug("Agent controller is already stopped.")
             return
 
         self.running = False
@@ -666,6 +675,4 @@ class AgentController:
 
         self.tts_tasks.clear()
 
-        print(
-            "🧠 Agent controller stopped."
-        )
+        logger.info("Agent controller stopped.")

@@ -63,13 +63,13 @@ REGISTRY = {
 
 
     # Example for future servers:
-    #
-    # "github": {
-    #     "default": "MEDIUM",
-    #     "methods": {
-    #         "delete_*": "HIGH",
-    #     },
-    # },
+    
+    "github": {
+        "default": "MEDIUM",
+        "methods": {
+            "delete_*": "HIGH",
+        },
+    },
 }
 
 

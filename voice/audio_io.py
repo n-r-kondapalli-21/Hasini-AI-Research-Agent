@@ -1,9 +1,18 @@
+import logging
 import threading
 
 import numpy as np
 import sounddevice as sd
 
-from .config import (INPUT_SAMPLE_RATE, INPUT_CHANNELS, AUDIO_DEVICE, VAD_FRAME_SAMPLES)
+from .config import (
+    INPUT_SAMPLE_RATE,
+    INPUT_CHANNELS,
+    AUDIO_DEVICE,
+    VAD_FRAME_SAMPLES,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 def audio_stream():
@@ -13,33 +22,58 @@ def audio_stream():
     Each frame is approximately VAD_FRAME_MS long.
     """
 
-    stream = sd.InputStream(
-        samplerate=INPUT_SAMPLE_RATE,
-        channels=INPUT_CHANNELS,
-        dtype="float32",
-        device=AUDIO_DEVICE,
-        blocksize=VAD_FRAME_SAMPLES,
-    )
+    stream = None
 
     try:
+        stream = sd.InputStream(
+            samplerate=INPUT_SAMPLE_RATE,
+            channels=INPUT_CHANNELS,
+            dtype="float32",
+            device=AUDIO_DEVICE,
+            blocksize=VAD_FRAME_SAMPLES,
+        )
 
         stream.start()
 
-        while True:
+        logger.debug("Microphone audio stream started.")
 
+        while True:
             audio, overflowed = stream.read(
                 VAD_FRAME_SAMPLES
             )
 
             if overflowed:
-                print("⚠️ Microphone buffer overflow.")
+                logger.warning(
+                    "Microphone buffer overflow."
+                )
 
             yield audio.flatten()
 
-    finally:
+    except Exception:
+        logger.exception(
+            "Microphone audio stream failed."
+        )
+        raise
 
-        stream.stop()
-        stream.close()
+    finally:
+        if stream is not None:
+            try:
+                stream.stop()
+            except Exception:
+                logger.warning(
+                    "Failed to stop microphone audio stream.",
+                    exc_info=True,
+                )
+
+            try:
+                stream.close()
+            except Exception:
+                logger.warning(
+                    "Failed to close microphone audio stream.",
+                    exc_info=True,
+                )
+
+        logger.debug("Microphone audio stream closed.")
 
 
 def record_until_silence(vad, max_duration):
@@ -50,12 +84,11 @@ def record_until_silence(vad, max_duration):
         numpy.float32 audio array.
     """
 
-    print("\n🎤 Listening...")
+    logger.info("Listening...")
 
     vad.reset()
 
     recorded_frames = []
-
     speech_started = False
 
     max_frames = int(
@@ -66,64 +99,78 @@ def record_until_silence(vad, max_duration):
 
     frame_count = 0
 
-    for frame in audio_stream():
+    try:
+        for frame in audio_stream():
+            frame_count += 1
 
-        frame_count += 1
+            result = vad.process(frame)
 
-        result = vad.process(frame)
+            # ----------------------------------------------
+            # Speech started
+            # ----------------------------------------------
 
-        # ----------------------------------------------
-        # Speech started
-        # ----------------------------------------------
+            if result is not None and "start" in result:
+                if not speech_started:
+                    speech_started = True
 
-        if result is not None and "start" in result:
+                    logger.info(
+                        "Speech detected."
+                    )
 
-            if not speech_started:
-
-                speech_started = True
-
-                print("🗣️ Speech detected.")
-
-        # ----------------------------------------------
-        # Save audio after speech starts
-        # ----------------------------------------------
-
-        if speech_started:
-
-            recorded_frames.append(frame.copy())
-
-        # ----------------------------------------------
-        # Speech ended
-        # ----------------------------------------------
-
-        if (
-            speech_started
-            and result is not None
-            and "end" in result
-        ):
-
-            print("✅ Speech complete.")
-
-            break
-
-        # ----------------------------------------------
-        # Safety timeout
-        # ----------------------------------------------
-
-        if frame_count >= max_frames:
+            # ----------------------------------------------
+            # Save audio after speech starts
+            # ----------------------------------------------
 
             if speech_started:
-                print("⏱️ Maximum recording time reached.")
-            else:
-                print("⏱️ No speech detected.")
+                recorded_frames.append(
+                    frame.copy()
+                )
 
-            break
+            # ----------------------------------------------
+            # Speech ended
+            # ----------------------------------------------
+
+            if (
+                speech_started
+                and result is not None
+                and "end" in result
+            ):
+                logger.info(
+                    "Speech complete."
+                )
+                break
+
+            # ----------------------------------------------
+            # Safety timeout
+            # ----------------------------------------------
+
+            if frame_count >= max_frames:
+                if speech_started:
+                    logger.warning(
+                        "Maximum recording time reached."
+                    )
+                else:
+                    logger.info(
+                        "No speech detected."
+                    )
+
+                break
+
+    except Exception:
+        logger.exception(
+            "Failed while recording speech."
+        )
+        raise
 
     if not recorded_frames:
+        return np.array(
+            [],
+            dtype=np.float32,
+        )
 
-        return np.array([], dtype=np.float32)
-
-    return np.concatenate(recorded_frames)
+    return np.concatenate(
+        recorded_frames
+    )
 
 
 # ============================================================
@@ -153,39 +200,70 @@ _cancel_event = threading.Event()
 _PLAYBACK_CHUNK_FRAMES = 1024
 
 
-def _get_stream_locked(sample_rate: int, channels: int = 1):
+def _get_stream_locked(
+    sample_rate: int,
+    channels: int = 1,
+):
     """Must be called with _stream_lock already held."""
+
     global _stream, _stream_sample_rate
 
-    if _stream is None or _stream_sample_rate != sample_rate:
-
+    if (
+        _stream is None
+        or _stream_sample_rate != sample_rate
+    ):
         if _stream is not None:
             try:
                 _stream.stop()
                 _stream.close()
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to close previous audio output stream.",
+                    exc_info=True,
+                )
 
-        _stream = sd.OutputStream(
-            samplerate=sample_rate,
-            channels=channels,
-            dtype="float32",
-            device=AUDIO_DEVICE,
-        )
-        _stream.start()
-        _stream_sample_rate = sample_rate
+        try:
+            _stream = sd.OutputStream(
+                samplerate=sample_rate,
+                channels=channels,
+                dtype="float32",
+                device=AUDIO_DEVICE,
+            )
+
+            _stream.start()
+            _stream_sample_rate = sample_rate
+
+        except Exception:
+            _stream = None
+            _stream_sample_rate = None
+
+            logger.exception(
+                "Failed to initialize audio output stream "
+                "(sample_rate=%s, channels=%s).",
+                sample_rate,
+                channels,
+            )
+            raise
 
     return _stream
 
 
-def play_audio(audio: np.ndarray, sample_rate: int):
+def play_audio(
+    audio: np.ndarray,
+    sample_rate: int,
+):
     """
-    Play audio through the speaker, in small chunks, checking for
-    cancellation between chunks so stop_audio() never has to abort/close
-    the stream while a write() is in flight on another thread.
+    Play audio through the speaker in small chunks.
+
+    Cancellation is checked between chunks so stop_audio()
+    does not need to abort/close the stream while a write()
+    is in flight on another thread.
     """
 
     if audio is None or len(audio) == 0:
+        logger.debug(
+            "Skipping audio playback: empty audio."
+        )
         return
 
     if audio.ndim == 1:
@@ -196,27 +274,47 @@ def play_audio(audio: np.ndarray, sample_rate: int):
     pos = 0
     n = len(audio)
 
-    while pos < n:
-
-        if _cancel_event.is_set():
-            break
-
-        end = min(pos + _PLAYBACK_CHUNK_FRAMES, n)
-        chunk = audio[pos:end]
-
-        with _stream_lock:
-
+    try:
+        while pos < n:
             if _cancel_event.is_set():
+                logger.debug(
+                    "Audio playback cancelled."
+                )
                 break
 
-            try:
-                stream = _get_stream_locked(sample_rate, channels=audio.shape[1])
-                stream.write(chunk)
-            except Exception:
-                # Stream was aborted/closed concurrently by stop_audio()
-                break
+            end = min(
+                pos + _PLAYBACK_CHUNK_FRAMES,
+                n,
+            )
 
-        pos = end
+            chunk = audio[pos:end]
+
+            with _stream_lock:
+                if _cancel_event.is_set():
+                    break
+
+                try:
+                    stream = _get_stream_locked(
+                        sample_rate,
+                        channels=audio.shape[1],
+                    )
+
+                    stream.write(chunk)
+
+                except Exception:
+                    if not _cancel_event.is_set():
+                        logger.exception(
+                            "Audio playback failed."
+                        )
+                    break
+
+            pos = end
+
+    except Exception:
+        logger.exception(
+            "Unexpected error during audio playback."
+        )
+        raise
 
 
 def stop_audio():
@@ -230,13 +328,24 @@ def stop_audio():
     _cancel_event.set()
 
     with _stream_lock:
-
         if _stream is not None:
             try:
                 _stream.abort()
+            except Exception:
+                logger.warning(
+                    "Failed to abort audio output stream.",
+                    exc_info=True,
+                )
+
+            try:
                 _stream.close()
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to close audio output stream.",
+                    exc_info=True,
+                )
 
             _stream = None
             _stream_sample_rate = None
+
+    logger.debug("Audio playback stopped.")

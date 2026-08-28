@@ -1,20 +1,61 @@
+"""
+Hasini Voice Command Listener.
+
+Handles microphone input after wake-word detection and after a barge-in
+interruption.
+
+Responsibilities:
+    - Wait for WAKE_DETECTED.
+    - Handle post-barge-in LISTENING.
+    - Start command listening.
+    - Use VAD to detect speech.
+    - Collect command audio.
+    - Detect end of speech.
+    - Transcribe captured audio.
+
+Does NOT:
+    - call the LLM directly
+    - execute tools
+    - generate TTS
+    - manage conversation history
+"""
+
+from __future__ import annotations
+
 import asyncio
+import logging
 import re
 import time
 from collections import deque
 
 import numpy as np
 
+from .audio_broadcaster import AudioBroadcaster
+from .state_machine import VoiceEvent, VoiceState, VoiceStateMachine
+from .providers.vad.base import VADProvider
+from .providers.stt.base import STTProvider
+from .agent_controller import AgentController
+
+
+logger = logging.getLogger("hasini.voice.command_listener")
+
 
 def is_stop_command(text: str) -> bool:
     """
-    Check whether user speech is a stop or cancel directive.
+    Check whether the complete user utterance is a stop/cancel directive.
+
+    Stop detection intentionally uses exact normalized phrases rather than
+    checking whether a stop word appears anywhere in a longer command.
+
+    This prevents commands such as:
+        "How do I stop a Python process?"
+    from being treated as a request to stop Hasini.
     """
     if not text:
         return False
 
     clean_text = re.sub(r"[^\w\s]", " ", text.lower()).strip()
-    words = clean_text.split()
+    clean_text = re.sub(r"\s+", " ", clean_text)
 
     stop_phrases = {
         "stop",
@@ -34,33 +75,18 @@ def is_stop_command(text: str) -> bool:
         "be quiet",
     }
 
-    if clean_text in stop_phrases:
-        return True
-
-    stop_words = {
-        "stop",
-        "quiet",
-        "cancel",
-        "pause",
-        "halt",
-        "silence",
-        "enough",
-        "exit",
-        "quit",
-        "goodbye",
-    }
-
-    return any(w in stop_words for w in words)
+    return clean_text in stop_phrases
 
 
 def is_interruption_filler(text: str) -> bool:
     """
-    Check whether user speech is a transient pause/filler word after barge-in.
+    Check whether user speech is a transient pause/filler after barge-in.
     """
     if not text:
         return True
 
     clean_text = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+    clean_text = re.sub(r"\s+", " ", clean_text)
 
     fillers = {
         "wait",
@@ -75,39 +101,13 @@ def is_interruption_filler(text: str) -> bool:
 
     return clean_text in fillers
 
-from .audio_broadcaster import AudioBroadcaster
-
-from .state_machine import (
-    VoiceEvent,
-    VoiceState,
-    VoiceStateMachine,
-)
-
-from .providers.vad.base import VADProvider
-from .providers.stt.base import STTProvider
-
-from .agent_controller import AgentController
-
 
 class CommandListener:
     """
-    Handles microphone input after wake-word detection
-    and after a barge-in interruption.
+    Handles microphone input after wake-word detection and barge-in.
 
-    Responsibilities:
-        - Wait for WAKE_DETECTED.
-        - Handle post-barge-in LISTENING.
-        - Start command listening.
-        - Use VAD to detect speech.
-        - Collect command audio.
-        - Detect end of speech.
-        - Transcribe captured audio.
-
-    Does NOT:
-        - call the LLM directly
-        - execute tools
-        - generate TTS
-        - manage conversation history
+    The listener keeps microphone frames in a rolling buffer so that speech
+    occurring while barge-in detection is being confirmed can be recovered.
     """
 
     def __init__(
@@ -118,123 +118,149 @@ class CommandListener:
         agent_controller: AgentController,
         state_machine: VoiceStateMachine,
     ):
-
         self.broadcaster = broadcaster
-
         self.vad = vad
-
         self.stt = stt
-
         self.agent_controller = agent_controller
-
         self.state_machine = state_machine
 
-        # ============================================================
-        # Microphone subscription
-        # ============================================================
-
+        # Microphone subscription.
         self.queue = broadcaster.subscribe()
 
         self.running = False
+        self.task: asyncio.Task | None = None
 
-        self.task = None
+        # Background transcription/agent tasks are tracked so shutdown can
+        # cancel them cleanly instead of leaving detached tasks alive.
+        self.background_tasks: set[asyncio.Task] = set()
 
-        # ============================================================
-        # Command audio
-        # ============================================================
+        # Command audio.
+        self.audio_buffer: list[np.ndarray] = []
 
-        self.audio_buffer = []
-
-        # ============================================================
-        # Wake-word suppression
-        # ============================================================
-
+        # Wake-word suppression.
         self.wake_suppression_seconds = 0.6
-
         self.listen_started_at = 0.0
 
-        # ============================================================
-        # Command session state
-        # ============================================================
-
+        # Command session state.
         self.listening_session_active = False
 
+        # This describes the current captured session only.
+        # It is cleared before background transcription starts; the captured
+        # value is passed explicitly to _transcribe().
         self.interrupted_session = False
 
-        # ============================================================
-        # Barge-in pre-buffer
-        # ============================================================
-        #
-        # VAD frame = 32 ms
-        #
-        # 25 frames × 32 ms = 800 ms
-        #
-        # This continuously stores the latest microphone audio.
-        #
-        # When barge-in is confirmed, the beginning of the user's
-        # command can be recovered even though the barge-in detector
-        # needed ~384 ms to confirm sustained speech.
-        #
-        # ============================================================
+        # True after VAD reports speech start.
+        self.speech_started = False
 
+        # Barge-in pre-buffer.
+        #
+        # VAD frame = 32 ms.
+        # 40 frames ~= 1.28 seconds of rolling microphone history.
         self.pre_buffer_frames = 40
+        self.recent_frames = deque(maxlen=self.pre_buffer_frames)
 
-        self.recent_frames = deque(
-            maxlen=self.pre_buffer_frames
-        )
-
-        self.preroll_frames = deque(
-            maxlen=15
-        )
+        # Pre-speech preroll used to preserve the beginning of a command.
+        self.preroll_frames = deque(maxlen=15)
 
     # ============================================================
     # START
     # ============================================================
 
     async def start(self):
-
+        """Start the command listener task."""
         if self.running:
             return
 
         self.running = True
 
-        self.task = asyncio.create_task(
-            self._listen_loop()
+        try:
+            self.task = asyncio.create_task(
+                self._listen_loop(),
+                name="command-listener",
+            )
+        except Exception:
+            self.running = False
+            logger.exception("Failed to create command listener task.")
+            raise
+
+        logger.info("Command listener started.")
+
+    # ============================================================
+    # BACKGROUND TASK MANAGEMENT
+    # ============================================================
+
+    def _track_background_task(
+        self,
+        coroutine,
+        name: str,
+    ) -> asyncio.Task:
+        """
+        Create and track a background task.
+
+        Tracking prevents transcription/agent tasks from surviving
+        CommandListener.stop().
+        """
+        task = asyncio.create_task(coroutine, name=name)
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task
+
+    async def _cancel_background_tasks(self) -> None:
+        """Cancel and await all outstanding background tasks."""
+        tasks = list(self.background_tasks)
+
+        if not tasks:
+            return
+
+        logger.debug(
+            "Cancelling %d command background task(s).",
+            len(tasks),
         )
 
-        print(
-            "🎧 Command listener started."
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        results = await asyncio.gather(
+            *tasks,
+            return_exceptions=True,
         )
+
+        for result in results:
+            if isinstance(result, Exception) and not isinstance(
+                result,
+                asyncio.CancelledError,
+            ):
+                logger.warning(
+                    "Background command task ended with an error: %r",
+                    result,
+                )
+
+        self.background_tasks.clear()
 
     # ============================================================
     # MAIN LISTENING LOOP
     # ============================================================
 
     async def _listen_loop(self):
-
+        """Continuously consume microphone frames and route them by state."""
         try:
-
             while self.running:
-
-                # --------------------------------------------------
-                # Receive microphone frame
-                # --------------------------------------------------
-
                 frame = await self.queue.get()
 
-                # --------------------------------------------------
-                # ALWAYS maintain rolling microphone buffer.
-                #
-                # This must happen before checking the state.
-                #
-                # That way, when the user starts speaking during
-                # SPEAKING, the beginning of their command is already
-                # available when barge-in is confirmed.
-                # --------------------------------------------------
+                if frame is None:
+                    logger.debug("Ignoring empty microphone frame.")
+                    continue
 
-                self.recent_frames.append(
-                    frame.copy()
-                )
+                # Always maintain the rolling microphone history before
+                # state-specific processing.
+                try:
+                    self.recent_frames.append(frame.copy())
+                except AttributeError:
+                    logger.warning(
+                        "Ignoring microphone frame without copy() support."
+                    )
+                    continue
 
                 state = self.state_machine.state
 
@@ -246,15 +272,10 @@ class CommandListener:
                     state == VoiceState.WAKE_DETECTED
                     and not self.listening_session_active
                 ):
-
                     await self._start_listening_session(
                         interrupted=False
                     )
-
-                    self._process_frame(
-                        frame
-                    )
-
+                    self._process_frame(frame)
                     continue
 
                 # ==================================================
@@ -265,19 +286,12 @@ class CommandListener:
                     state == VoiceState.LISTENING
                     and not self.listening_session_active
                 ):
-
                     await self._start_listening_session(
                         interrupted=True
                     )
 
-                    # IMPORTANT:
-                    #
-                    # Do NOT call _process_frame(frame) here.
-                    #
-                    # _start_listening_session() already replays
-                    # the recent buffered frames, including this
-                    # frame.
-                    #
+                    # _start_listening_session() replays the buffered frames,
+                    # including the current frame. Do not process it again.
                     continue
 
                 # ==================================================
@@ -288,22 +302,24 @@ class CommandListener:
                     state == VoiceState.LISTENING
                     and self.listening_session_active
                 ):
-
-                    self._process_frame(
-                        frame
-                    )
-
-                    continue
+                    self._process_frame(frame)
 
         except asyncio.CancelledError:
+            logger.debug("Command listener loop cancelled.")
+            raise
 
-            pass
-
-        except Exception as e:
-
-            print(
-                f"\n❌ Command listener error: {e}"
+        except Exception:
+            logger.exception(
+                "Command listener loop failed unexpectedly."
             )
+
+            self.running = False
+            self.listening_session_active = False
+            self.interrupted_session = False
+            self.audio_buffer.clear()
+            self.recent_frames.clear()
+            self.preroll_frames.clear()
+            self.state_machine.reset()
 
     # ============================================================
     # START LISTENING SESSION
@@ -313,23 +329,20 @@ class CommandListener:
         self,
         interrupted: bool = False,
     ):
-
-        # --------------------------------------------------
-        # Reset command VAD state
-        # --------------------------------------------------
-
-        self.vad.reset()
+        """Initialize a new command capture session."""
+        try:
+            self.vad.reset()
+        except Exception:
+            logger.exception("Failed to reset command VAD.")
+            raise
 
         self.audio_buffer = []
-
         self.preroll_frames.clear()
+        self.speech_started = False
 
-        self.listen_started_at = (
-            time.monotonic()
-        )
+        self.listen_started_at = time.monotonic()
 
         self.listening_session_active = True
-
         self.interrupted_session = interrupted
 
         # ==================================================
@@ -337,140 +350,108 @@ class CommandListener:
         # ==================================================
 
         if not interrupted:
-
-            if self.state_machine.can_handle(VoiceEvent.LISTENING_STARTED):
+            if self.state_machine.can_handle(
+                VoiceEvent.LISTENING_STARTED
+            ):
                 self.state_machine.handle_event(
                     VoiceEvent.LISTENING_STARTED
                 )
 
-            print(
-                "🎤 Listening for command..."
-            )
-
+            logger.info("Listening for command...")
             return
 
         # ==================================================
         # BARGE-IN SESSION
         # ==================================================
 
-        print(
-            "🎤 Listening after interruption..."
-        )
+        logger.info("Listening after interruption.")
 
-        # --------------------------------------------------
-        # Recover buffered microphone audio.
-        #
-        # This contains the beginning of the user's speech
-        # that happened while BargeInDetector was confirming
-        # the interruption.
-        # --------------------------------------------------
-
-        buffered_frames = list(
-            self.recent_frames
-        )
-
+        buffered_frames = list(self.recent_frames)
         self.recent_frames.clear()
 
-        print(
-            f"📼 Recovering "
-            f"{len(buffered_frames)} "
-            f"recent audio frames."
+        logger.debug(
+            "Recovering %d recent audio frames.",
+            len(buffered_frames),
         )
 
-        # --------------------------------------------------
-        # Feed buffered audio through command VAD.
-        # --------------------------------------------------
-
         for buffered_frame in buffered_frames:
-
             if not self.running:
                 break
 
-            if (
-                self.state_machine.state
-                != VoiceState.LISTENING
-            ):
+            if self.state_machine.state != VoiceState.LISTENING:
                 break
 
-            self._process_frame(
-                buffered_frame
-            )
-
-            # --------------------------------------------------
-            # If speech already ended while processing the
-            # recovered frames, stop replaying.
-            # --------------------------------------------------
+            self._process_frame(buffered_frame)
 
             if not self.listening_session_active:
-
                 break
 
     # ============================================================
     # PROCESS AUDIO FRAME
     # ============================================================
 
-    def _process_frame(
-        self,
-        frame,
-    ):
+    def _process_frame(self, frame):
+        """Process one microphone frame through command VAD."""
+        if not self.listening_session_active:
+            return
 
         # ============================================================
         # Wake-word suppression
         # ============================================================
 
-        # Only normal wake-word sessions need suppression.
-        #
-        # Barge-in sessions must process audio immediately because
-        # the user is already speaking and there is no wake word.
-        #
-
         if not self.interrupted_session:
+            elapsed = time.monotonic() - self.listen_started_at
 
-            elapsed = (
-                time.monotonic()
-                - self.listen_started_at
-            )
-
-            if (
-                elapsed
-                < self.wake_suppression_seconds
-            ):
-
+            if elapsed < self.wake_suppression_seconds:
                 return
 
-            # Post-wake silence timeout (8s) if user hasn't started speaking
-            if elapsed > 8.0 and not self.audio_buffer:
-
-                print(
-                    "\n⏱️ Post-wake silence timeout (8s). Disengaging..."
+            # If the user never starts speaking after wake detection,
+            # disengage after 8 seconds.
+            if elapsed > 8.0 and not self.speech_started:
+                logger.info(
+                    "Post-wake silence timeout (8s). Disengaging."
                 )
 
                 self.listening_session_active = False
-
                 self.interrupted_session = False
-
+                self.audio_buffer.clear()
+                self.preroll_frames.clear()
+                self.recent_frames.clear()
                 self.state_machine.reset()
-
                 return
 
-        # --------------------------------------------------
-        # Maintain rolling pre-speech preroll buffer
-        # --------------------------------------------------
+        # ------------------------------------------------------------
+        # Maintain rolling pre-speech preroll.
+        # ------------------------------------------------------------
+
         self.preroll_frames.append(frame.copy())
 
         # ============================================================
         # Run command VAD
         # ============================================================
 
-        min_silence_ms = 1200 if self.interrupted_session else None
-
-        result = self.vad.process(
-            frame,
-            min_silence_ms=min_silence_ms,
+        min_silence_ms = (
+            1200 if self.interrupted_session else None
         )
 
-        if result is None:
+        try:
+            result = self.vad.process(
+                frame,
+                min_silence_ms=min_silence_ms,
+            )
+        except Exception:
+            logger.exception(
+                "Command VAD processing failed."
+            )
 
+            self.listening_session_active = False
+            self.interrupted_session = False
+            self.audio_buffer.clear()
+            self.preroll_frames.clear()
+            self.state_machine.reset()
+            return
+
+        if result is None:
             return
 
         # ============================================================
@@ -478,17 +459,15 @@ class CommandListener:
         # ============================================================
 
         if "start" in result:
+            logger.info("Speech detected.")
 
-            print(
-                "🗣️ Speech detected."
-            )
+            self.speech_started = True
 
-            # Prepend recent preroll frames so initial speech onset is preserved.
+            # Preserve recent frames so the beginning of speech is not lost.
             for p_frame in self.preroll_frames:
                 self.audio_buffer.append(p_frame.copy())
 
             self.preroll_frames.clear()
-
             return
 
         # ============================================================
@@ -496,11 +475,8 @@ class CommandListener:
         # ============================================================
 
         if "speech" in result:
-
-            self.audio_buffer.append(
-                frame.copy()
-            )
-
+            self.speech_started = True
+            self.audio_buffer.append(frame.copy())
             return
 
         # ============================================================
@@ -508,65 +484,90 @@ class CommandListener:
         # ============================================================
 
         if "end" in result:
+            logger.info("Speech complete.")
 
-            print(
-                "✅ Speech complete."
-            )
+            # Include the final frame.
+            self.audio_buffer.append(frame.copy())
 
-            # Include final frame.
-            self.audio_buffer.append(
-                frame.copy()
-            )
-
-            # --------------------------------------------------
-            # End current listening session.
-            # --------------------------------------------------
+            # Capture the session-specific interruption flag BEFORE clearing
+            # it. This value must belong to this transcription task only.
+            is_interrupted = self.interrupted_session
 
             self.listening_session_active = False
+            self.interrupted_session = False
+            self.speech_started = False
 
-            # Note: self.interrupted_session is intentionally NOT cleared here.
-            # It must be preserved until _transcribe() runs so _transcribe() can
-            # determine whether this audio segment originated from an interruption.
+            # ------------------------------------------------------------
+            # LISTENING -> TRANSCRIBING
+            # ------------------------------------------------------------
 
-            # --------------------------------------------------
-            # LISTENING → TRANSCRIBING
-            # --------------------------------------------------
+            try:
+                self.state_machine.handle_event(
+                    VoiceEvent.SPEECH_COMPLETE
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to transition to TRANSCRIBING state."
+                )
 
-            self.state_machine.handle_event(
-                VoiceEvent.SPEECH_COMPLETE
-            )
+                self.audio_buffer.clear()
+                self.preroll_frames.clear()
+                self.recent_frames.clear()
+                self.state_machine.reset()
+                return
 
-            # --------------------------------------------------
+            # ------------------------------------------------------------
             # Combine captured frames.
-            # --------------------------------------------------
+            # ------------------------------------------------------------
 
-            audio = np.concatenate(
-                self.audio_buffer
-            )
+            if not self.audio_buffer:
+                logger.warning(
+                    "Speech ended but no audio was captured."
+                )
+
+                self.state_machine.reset()
+                return
+
+            try:
+                audio = np.concatenate(self.audio_buffer)
+            except Exception:
+                logger.exception(
+                    "Failed to combine captured command audio."
+                )
+
+                self.audio_buffer.clear()
+                self.state_machine.reset()
+                return
 
             self.audio_buffer = []
-
-            # --------------------------------------------------
-            # The command has now been extracted.
-            # We no longer need the old microphone frames.
-            # --------------------------------------------------
-
             self.recent_frames.clear()
+            self.preroll_frames.clear()
 
-            print(
-                f"📦 Captured "
-                f"{len(audio)} samples."
+            logger.debug(
+                "Captured %d audio samples.",
+                len(audio),
             )
 
-            # --------------------------------------------------
+            # ------------------------------------------------------------
             # Transcribe asynchronously.
-            # --------------------------------------------------
+            #
+            # is_interrupted is passed explicitly so another session cannot
+            # overwrite the metadata for this transcription task.
+            # ------------------------------------------------------------
 
-            asyncio.create_task(
-                self._transcribe(
-                    audio
+            try:
+                self._track_background_task(
+                    self._transcribe(
+                        audio,
+                        is_interrupted,
+                    ),
+                    "command-transcription",
                 )
-            )
+            except Exception:
+                logger.exception(
+                    "Failed to schedule command transcription."
+                )
+                self.state_machine.reset()
 
     # ============================================================
     # TRANSCRIPTION
@@ -575,63 +576,58 @@ class CommandListener:
     async def _transcribe(
         self,
         audio,
+        is_interrupted: bool,
     ):
+        """
+        Transcribe one captured command.
 
-        is_interrupted = self.interrupted_session
-        self.interrupted_session = False
-
+        is_interrupted is immutable session metadata passed by the caller.
+        It must not be read from self.interrupted_session because that value
+        belongs to the next/current microphone session.
+        """
         try:
-
-            # --------------------------------------------------
-            # Verify state.
-            # --------------------------------------------------
-
             if (
                 self.state_machine.state
                 != VoiceState.TRANSCRIBING
             ):
-
+                logger.debug(
+                    "Ignoring transcription because state is %s.",
+                    self.state_machine.state,
+                )
                 return
 
-            print(
-                "📝 Transcribing..."
-            )
-
-            # --------------------------------------------------
-            # Run STT outside event loop.
-            # --------------------------------------------------
+            logger.info("Transcribing command...")
 
             text = await asyncio.to_thread(
                 self.stt.transcribe,
                 audio,
             )
 
-            text = (
-                text.strip()
-                if text
-                else ""
-            )
+            text = text.strip() if text else ""
 
-            print(
-                f"📝 Transcription: {text}"
+            logger.info(
+                "Transcription: %s",
+                text if text else "<empty>",
             )
 
             # ==================================================
-            # Empty transcription or Interruption Filler
+            # Empty transcription / interruption filler
             # ==================================================
 
-            if not text or (is_interrupted and is_interruption_filler(text)):
-
+            if not text or (
+                is_interrupted
+                and is_interruption_filler(text)
+            ):
                 if is_interrupted:
-
-                    print(
-                        f"🎤 Interruption filler or pause recognized ('{text or 'silence'}'). "
-                        "Continuing to listen for your command..."
+                    logger.info(
+                        "Interruption filler or pause recognized ('%s'). "
+                        "Continuing to listen for the command.",
+                        text or "silence",
                     )
 
                     self.listening_session_active = False
-
                     self.interrupted_session = True
+                    self.speech_started = False
 
                     if self.state_machine.can_handle(
                         VoiceEvent.LISTENING_STARTED
@@ -644,105 +640,94 @@ class CommandListener:
 
                     return
 
-                else:
-
-                    print(
-                        "⚠️ No speech recognized."
-                    )
-
-                    self.listening_session_active = False
-
-                    self.interrupted_session = False
-
-                    self.state_machine.reset()
-
-                    return
+                logger.warning("No speech recognized.")
+                self.listening_session_active = False
+                self.interrupted_session = False
+                self.state_machine.reset()
+                return
 
             # ==================================================
             # Stop command handling
             # ==================================================
 
             if is_stop_command(text):
-
-                print(
-                    f"🛑 Stop command recognized: '{text}'. Returning to IDLE."
+                logger.info(
+                    "Stop command recognized: '%s'. Returning to IDLE.",
+                    text,
                 )
 
                 self.listening_session_active = False
-
                 self.interrupted_session = False
-
                 self.state_machine.reset()
-
                 return
 
             # ==================================================
-            # TRANSCRIBING → THINKING
+            # TRANSCRIBING -> THINKING
             # ==================================================
 
-            self.state_machine.handle_event(
-                VoiceEvent.TRANSCRIPTION_COMPLETE
-            )
-
-            # --------------------------------------------------
-            # Process agent asynchronously.
-            # --------------------------------------------------
-
-            asyncio.create_task(
-                self._process_agent(
-                    text
+            try:
+                self.state_machine.handle_event(
+                    VoiceEvent.TRANSCRIPTION_COMPLETE
                 )
-            )
+            except Exception:
+                logger.exception(
+                    "Failed to transition to THINKING state."
+                )
+                self.state_machine.reset()
+                return
+
+            # ------------------------------------------------------------
+            # Process agent asynchronously.
+            # ------------------------------------------------------------
+
+            try:
+                self._track_background_task(
+                    self._process_agent(text),
+                    "command-agent-processing",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to schedule agent processing."
+                )
+                self.state_machine.reset()
 
         except asyncio.CancelledError:
+            logger.debug("Command transcription cancelled.")
+            raise
 
-            pass
-
-        except Exception as e:
-
-            print(
-                f"\n❌ Transcription error: {e}"
+        except Exception:
+            logger.exception(
+                "Transcription failed unexpectedly."
             )
 
             self.listening_session_active = False
-
             self.interrupted_session = False
-
             self.state_machine.reset()
 
     # ============================================================
     # AGENT
     # ============================================================
 
-    async def _process_agent(
-        self,
-        text: str,
-    ):
-
+    async def _process_agent(self, text: str):
+        """Pass the recognized command to AgentController."""
         try:
-
-            response = await (
-                self.agent_controller.process(
-                    text
-                )
-            )
+            response = await self.agent_controller.process(text)
 
             if response is None:
-
+                logger.debug(
+                    "Agent controller returned no response."
+                )
                 return
 
-            print(
-                f"🤖 Agent response:\n{response}"
-            )
+            logger.info("Agent response received.")
 
         except asyncio.CancelledError:
-
+            logger.debug("Agent processing cancelled.")
             raise
 
-        except Exception as e:
-
-            print(
-                f"❌ Agent processing error: {e}"
+        except Exception:
+            logger.exception(
+                "Agent processing error."
             )
 
     # ============================================================
@@ -750,35 +735,43 @@ class CommandListener:
     # ============================================================
 
     async def stop(self):
-
+        """Stop the listener and all of its background work."""
         if not self.running:
-
+            # Even if the main listener is already stopped, make sure
+            # detached tasks are not left alive.
+            await self._cancel_background_tasks()
             return
 
         self.running = False
 
-        if self.task is not None:
-
-            self.task.cancel()
-
-            try:
-
-                await self.task
-
-            except asyncio.CancelledError:
-
-                pass
-
+        task = self.task
         self.task = None
 
-        self.audio_buffer = []
+        if task is not None:
+            current_task = asyncio.current_task()
 
+            if task is not current_task:
+                task.cancel()
+
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    logger.debug(
+                        "Command listener task cancelled successfully."
+                    )
+                except Exception:
+                    logger.exception(
+                        "Error while stopping command listener task."
+                    )
+
+        await self._cancel_background_tasks()
+
+        self.audio_buffer.clear()
         self.recent_frames.clear()
+        self.preroll_frames.clear()
 
         self.listening_session_active = False
-
         self.interrupted_session = False
+        self.speech_started = False
 
-        print(
-            "🎧 Command listener stopped."
-        )
+        logger.info("Command listener stopped.")
