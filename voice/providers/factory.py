@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from .stt.faster_whisper import FasterWhisperSTT
-from .tts.piper import PiperTTS
+from .tts.kokoro import KokoroTTS
 from .vad.silero import SileroVAD
 from .wakeword.openwakeword import OpenWakeWordProvider
 
@@ -65,7 +65,7 @@ def create_tts_provider():
         TTS_PROVIDER,
     )
 
-    if TTS_PROVIDER != "piper":
+    if TTS_PROVIDER != "kokoro":
         logger.error(
             "Unsupported TTS provider configured: %s",
             TTS_PROVIDER,
@@ -75,7 +75,8 @@ def create_tts_provider():
         )
 
     try:
-        provider = PiperTTS()
+        provider = KokoroTTS()
+
     except Exception:
         logger.exception(
             "Failed to initialize TTS provider: %s",
@@ -87,6 +88,7 @@ def create_tts_provider():
         "TTS provider ready: %s",
         TTS_PROVIDER,
     )
+
     return provider
 
 

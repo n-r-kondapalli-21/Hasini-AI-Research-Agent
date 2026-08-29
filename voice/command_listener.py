@@ -35,6 +35,7 @@ from .state_machine import VoiceEvent, VoiceState, VoiceStateMachine
 from .providers.vad.base import VADProvider
 from .providers.stt.base import STTProvider
 from .agent_controller import AgentController
+from .generate_exit_ack_voices import ExitAcknowledgement
 
 
 logger = logging.getLogger("hasini.voice.command_listener")
@@ -161,6 +162,9 @@ class CommandListener:
 
         # Pre-speech preroll used to preserve the beginning of a command.
         self.preroll_frames = deque(maxlen=15)
+
+        # Exit acknowledgement sounds
+        self.exit_ack = ExitAcknowledgement()
 
     # ============================================================
     # START
@@ -659,6 +663,9 @@ class CommandListener:
                 self.listening_session_active = False
                 self.interrupted_session = False
                 self.state_machine.reset()
+
+                # Play exit acknowledgement
+                await self.exit_ack.play()
                 return
 
             # ==================================================

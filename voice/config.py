@@ -11,14 +11,31 @@ MAX_RECORD_SECONDS = 10
 
 
 # ============================================================
-# Piper TTS
+# Voice Providers
 # ============================================================
 
-PIPER_MODEL = r"D:\Hasini_Ai_Research_Agent\models\piper\en_US-lessac-medium.onnx"
+STT_PROVIDER = "faster_whisper"
 
-PIPER_OUTPUT_FILE = r"D:\Hasini_Ai_Research_Agent\runtime\audio\tts_output.wav"
+TTS_PROVIDER = "kokoro"
 
-PIPER_OUTPUT_FILE_TEST = r"D:\Hasini_Ai_Research_Agent\models\piper\test_output.wav"
+VAD_PROVIDER = "silero"
+
+WAKEWORD_PROVIDER = "openwakeword"
+
+
+# ============================================================
+# kokoro TTS
+# ============================================================
+
+KOKORO_MODEL = r"D:\Hasini_Ai_Research_Agent\models\kokoro\kokoro-v1_0.pth"
+
+KOKORO_CONFIG = r"D:\Hasini_Ai_Research_Agent\models\kokoro\config.json"
+
+KOKORO_VOICE = r"D:\Hasini_Ai_Research_Agent\models\kokoro\voices\af_heart.pt"
+
+KOKORO_OUTPUT_FILE = r"D:\Hasini_Ai_Research_Agent\runtime\audio\tts_output.wav"
+
+KOKORO_OUTPUT_FILE_TEST = r"D:\Hasini_Ai_Research_Agent\models\kokoro\test_output.wav"
 
 
 # ============================================================
@@ -31,7 +48,7 @@ WHISPER_COMPUTE_TYPE = "int8"
 
 WHISPER_DEVICE = "cpu"
 
-WHISPER_CPU_THREADS = 2
+WHISPER_CPU_THREADS = 4
 
 
 # ============================================================
@@ -86,19 +103,6 @@ BARGE_IN_GRACE_PERIOD_MS = 400
 # RMS below this value is treated as background noise.
 BARGE_IN_MIN_RMS = 0.008
 
-
-
-# ============================================================
-# Voice Providers
-# ============================================================
-
-STT_PROVIDER = "faster_whisper"
-
-TTS_PROVIDER = "piper"
-
-VAD_PROVIDER = "silero"
-
-WAKEWORD_PROVIDER = "openwakeword"
 
 
 
