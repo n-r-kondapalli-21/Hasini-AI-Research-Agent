@@ -1,0 +1,28 @@
+
+{
+    "filesystem": {
+        "transport": "stdio",
+        "command": "mcp-server-filesystem",
+        "args": [
+            "D:\\Hasini_Ai_Research_Agent\\AI_Research"
+        ]
+    },
+
+    "github": {
+        "transport": "streamable_http",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": {
+            "Authorization": "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"
+        }
+    },
+
+    "openalgo": {
+        "transport": "stdio",
+        "command": "D:\\Algo_Trading_OpenAlgo\\openalgo\\.venv\\Scripts\\python.exe",
+        "args": [
+            "D:\\Algo_Trading_OpenAlgo\\openalgo\\mcp\\mcpserver.py",
+            "19f8897df3523b8a84a30fc4c73dc9bb037df7057a9d8d6a681c7184335ce3dc",
+            "http://127.0.0.1:5000"
+        ]
+    }
+}

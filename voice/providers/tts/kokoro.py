@@ -38,6 +38,9 @@ warnings.filterwarnings(
     module=r"phonemizer.*",
 )
 
+# Suppress phonemizer logging warnings about word count mismatches
+logging.getLogger("phonemizer").setLevel(logging.ERROR)
+
 from kokoro import KModel, KPipeline
 
 from ...config import (

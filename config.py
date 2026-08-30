@@ -49,14 +49,6 @@ if not provider["api_key"]:
 Tavily_api_key=os.getenv("TAVILY_API_KEY")
 
 
-# GitHub token
-github_token = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")
-
-if not github_token:
-    raise ValueError(
-        "GITHUB_PERSONAL_ACCESS_TOKEN is missing from .env"
-    )
-
 # ============================================================
 # Conversation Memory
 # ============================================================

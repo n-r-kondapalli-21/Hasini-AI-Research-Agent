@@ -1,0 +1,188 @@
+"""
+MCP server client utilities.
+
+Responsible for:
+- Loading MCP server configuration from mcp_config/mcp_servers.json.
+- Connecting to configured MCP servers independently.
+- Discovering MCP tools.
+- Returning a combined MCP client.
+- Reporting active configured MCP servers.
+
+Environment-variable substitution is intentionally not used yet.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+MCP_SERVER_CONFIG = (
+    Path(__file__).resolve().parent
+    / "mcp_servers.json"
+)
+
+
+# ---------------------------------------------------------------------------
+# Configuration loading
+# ---------------------------------------------------------------------------
+
+def load_mcp_servers() -> dict:
+    """
+    Load MCP server configuration from JSON.
+
+    Environment-variable substitution is intentionally disabled
+    for now. Values are used exactly as defined in the JSON file.
+    """
+
+    try:
+        with MCP_SERVER_CONFIG.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            servers = json.load(file)
+
+    except FileNotFoundError:
+        logger.error(
+            "MCP server configuration file not found: %s",
+            MCP_SERVER_CONFIG,
+        )
+        return {}
+
+    except json.JSONDecodeError as e:
+        logger.error(
+            "Invalid JSON in MCP server configuration '%s': %s",
+            MCP_SERVER_CONFIG,
+            e,
+        )
+        return {}
+
+    except Exception as e:
+        logger.error(
+            "Failed to load MCP server configuration: %s",
+            e,
+        )
+        return {}
+
+    if not isinstance(servers, dict):
+        logger.error(
+            "MCP server configuration must contain a JSON object."
+        )
+        return {}
+
+    return servers
+
+
+# ---------------------------------------------------------------------------
+# MCP tool discovery
+# ---------------------------------------------------------------------------
+
+async def get_mcp_tools():
+    """
+    Connect to each configured MCP server independently.
+
+    A failure in one MCP server does not prevent other MCP servers
+    from loading.
+
+    Returns:
+        tuple:
+            (combined MCP client, discovered MCP tools)
+    """
+
+    mcp_servers = load_mcp_servers()
+
+    if not mcp_servers:
+        logger.warning(
+            "No MCP servers are configured."
+        )
+
+        return (
+            MultiServerMCPClient(
+                {},
+                tool_name_prefix=True,
+            ),
+            [],
+        )
+
+    tools = []
+    working_servers = {}
+
+    for server_name, server_config in mcp_servers.items():
+
+        try:
+
+            logger.info(
+                "Connecting to MCP server '%s'...",
+                server_name,
+            )
+
+            single_client = MultiServerMCPClient(
+                {
+                    server_name: server_config,
+                },
+                tool_name_prefix=True,
+            )
+
+            server_tools = await single_client.get_tools()
+
+            tools.extend(server_tools)
+
+            working_servers[server_name] = server_config
+
+            logger.info(
+                "MCP server '%s' connected: %d tool(s) loaded.",
+                server_name,
+                len(server_tools),
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "MCP server '%s' failed to connect and will be skipped.",
+                server_name,
+            )
+
+    # ------------------------------------------------------------------
+    # Combined client
+    # ------------------------------------------------------------------
+
+    client = MultiServerMCPClient(
+        working_servers,
+        tool_name_prefix=True,
+    )
+
+    logger.info(
+        "MCP initialization complete: %d server(s), %d tool(s).",
+        len(working_servers),
+        len(tools),
+    )
+
+    return client, tools
+
+
+# ---------------------------------------------------------------------------
+# Active MCP servers
+# ---------------------------------------------------------------------------
+
+def get_active_mcp_servers() -> list[str]:
+    """
+    Return configured MCP server IDs.
+
+    These are the server IDs defined in mcp_servers.json.
+    """
+
+    servers = load_mcp_servers()
+
+    return list(
+        servers.keys()
+    )

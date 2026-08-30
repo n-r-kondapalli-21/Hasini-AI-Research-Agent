@@ -1,50 +1,43 @@
 
+"""
+Application tool registry.
+
+Responsible only for:
+- Registering built-in application tools.
+- Grouping built-in tools by category.
+- Providing access to built-in tools.
+
+MCP tools are managed separately by MCPRegistry.
+"""
+
+from __future__ import annotations
+
 import logging
 
 from Tools.web_search import web_tools
 from Tools.weather import weather_tools
 from Tools.calculator import calculator_tool
-from mcp_servers.mcp_tools import get_mcp_tools
 
-
-from tool_management.permission_gated_tool import (create_permission_gated_tool,)
-
-from tool_management.permission_registry import (discover_permissions,resolve_tool_server,)
 
 logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
     """
-    Central registry for all tools available to Hasini.
+    Registry for built-in application tools.
 
-    The registry is responsible for:
-        - Loading built-in tools
-        - Loading MCP tools
-        - Applying permission gates to MCP tools
-        - Grouping tools by category
-        - Providing access to individual or all tools
+    MCP tools are intentionally not managed here.
     """
 
-    def __init__(self, confirmation_manager=None):
-
-        self.confirmation_manager = confirmation_manager
+    def __init__(self):
 
         self._tools = {}
         self._categories = {}
 
-        self.mcp_client = None
-
     async def initialize(self):
         """
-        Load and register all available tools.
+        Load and register built-in tools.
         """
-
-        # --------------------------------------------------
-        # Discover permissions before loading MCP tools
-        # --------------------------------------------------
-
-        discover_permissions()
 
         # --------------------------------------------------
         # Web tools
@@ -63,49 +56,21 @@ class ToolRegistry:
             category="weather",
             tools=weather_tools,
         )
-        #------------------------------------------------------
-        #calculator tools
-        #-----------------------------------------------------
+
+        # --------------------------------------------------
+        # Calculator tools
+        # --------------------------------------------------
+
         self.register(
             category="calculator",
             tools=calculator_tool,
         )
 
-
-
-        # --------------------------------------------------
-        # MCP tools
-        # --------------------------------------------------
-
-        mcp_client, mcp_tools = await get_mcp_tools()
-
-        self.mcp_client = mcp_client
-
-        gated_mcp_tools = []
-
-        for tool in mcp_tools:
-
-            server_id, method_name = resolve_tool_server(
-                tool.name
-            )
-
-            gated_tool = create_permission_gated_tool(
-                tool=tool,
-                server_id=server_id,
-                method_name=method_name,
-                confirmation_manager=self.confirmation_manager,
-            )
-
-            gated_mcp_tools.append(gated_tool)
-
-        self.register(
-            category="mcp",
-            tools=gated_mcp_tools,
-        )
-
         logger.info(
-            "Tool registry initialized with %d tools.",
+            "Built-in tool registry initialized with %d tools "
+            "across %d categories.",
             len(self._tools),
+            len(self._categories),
         )
 
         return self
@@ -116,7 +81,7 @@ class ToolRegistry:
 
     def register(self, category, tools):
         """
-        Register one tool or multiple tools under a category.
+        Register one tool or multiple built-in tools.
         """
 
         category = category.lower().strip()
@@ -124,18 +89,20 @@ class ToolRegistry:
         if category not in self._categories:
             self._categories[category] = []
 
-        # Accept a single tool or a collection of tools
+        # Accept a single tool or a collection of tools.
         if hasattr(tools, "name"):
             tools = [tools]
 
         for tool in tools:
 
             if not hasattr(tool, "name"):
+
                 logger.warning(
                     "Skipping invalid tool in category '%s': %r",
                     category,
                     tool,
                 )
+
                 continue
 
             tool_name = tool.name.lower().strip()
@@ -152,7 +119,7 @@ class ToolRegistry:
 
     def get_all_tools(self):
         """
-        Return every registered tool.
+        Return all registered built-in tools.
         """
 
         return list(self._tools.values())
@@ -163,7 +130,7 @@ class ToolRegistry:
 
     def get_tools(self, category):
         """
-        Return tools belonging to a category.
+        Return built-in tools belonging to a category.
         """
 
         category = category.lower().strip()
@@ -178,7 +145,7 @@ class ToolRegistry:
 
     def get_tool(self, name):
         """
-        Return a tool by name.
+        Return a built-in tool by name.
         """
 
         return self._tools.get(
@@ -191,21 +158,9 @@ class ToolRegistry:
 
     def categories(self):
         """
-        Return all registered categories.
+        Return categories containing built-in tools.
         """
 
         return list(
             self._categories.keys()
         )
-
-    # ------------------------------------------------------
-    # MCP client
-    # ------------------------------------------------------
-
-    def get_mcp_client(self):
-        """
-        Return the MCP client.
-        """
-
-        return self.mcp_client
-

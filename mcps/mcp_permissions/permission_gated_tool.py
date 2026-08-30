@@ -43,7 +43,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from langchain_core.tools import StructuredTool
 
-from permissions import ToolCall, check
+from .permissions import ToolCall, check
 
 from voice.confirmation import ConfirmationRejected, ConfirmationTimeout
 

@@ -1,3 +1,4 @@
+
 """
 Shared research-agent runtime.
 
@@ -7,6 +8,18 @@ the text and voice entrypoints.
 Entry points:
     main.py       -> text mode
     voice_main.py -> voice mode
+
+Registry architecture:
+
+    ToolRegistry
+        -> Built-in application tools
+
+    MCPRegistry
+        -> MCP servers and MCP tools
+
+    AgentToolRegistry
+        -> Read-only facade combining both registries
+           for the agent and terminal commands
 """
 
 from __future__ import annotations
@@ -19,50 +32,245 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, AIMessageChunk
 
 from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
+
 from services.conversation_memory import ConversationMemory
 from services.llm import llm
+
 from system_prompt import get_system_prompt
-from tool_management.tool_registry import ToolRegistry
-from voice.confirmation import ConfirmationRejected, ConfirmationTimeout
+
+from Tools.tool_registry import ToolRegistry
+
+from mcps.mcp_registry import MCPRegistry
+
+from voice.confirmation import (
+    ConfirmationRejected,
+    ConfirmationTimeout,
+)
 
 
 logger = logging.getLogger("hasini.agent_runtime")
 
 
-async def create_research_agent(confirmation_manager=None,mode: str = "text",):
+class AgentToolRegistry:
     """
-    Build the research agent using the central Tool Registry.
+    Read-only facade over the built-in ToolRegistry and MCPRegistry.
+
+    Tool ownership remains completely separate:
+
+        ToolRegistry
+            -> web
+            -> weather
+            -> calculator
+
+        MCPRegistry
+            -> filesystem
+            -> github
+            -> openalgo
+
+    This facade only combines access to both registries for the
+    agent runtime and terminal command interface.
+    """
+
+    def __init__(
+        self,
+        tool_registry: ToolRegistry,
+        mcp_registry: MCPRegistry,
+    ):
+        self.tool_registry = tool_registry
+        self.mcp_registry = mcp_registry
+
+    # ------------------------------------------------------
+    # All tools
+    # ------------------------------------------------------
+
+    def get_all_tools(self):
+        """
+        Return all built-in and MCP tools.
+        """
+
+        return (
+            self.tool_registry.get_all_tools()
+            + self.mcp_registry.get_all_tools()
+        )
+
+    # ------------------------------------------------------
+    # Category tools
+    # ------------------------------------------------------
+
+    def get_tools(self, category: str):
+        """
+        Return tools belonging to a category.
+
+        Built-in categories are handled by ToolRegistry.
+        MCP server categories are handled by MCPRegistry.
+        """
+
+        if not isinstance(category, str):
+            return []
+
+        category = category.lower().strip()
+
+        tools = self.tool_registry.get_tools(
+            category
+        )
+
+        if tools:
+            return tools
+
+        return self.mcp_registry.get_tools(
+            category
+        )
+
+    # ------------------------------------------------------
+    # Individual tool
+    # ------------------------------------------------------
+
+    def get_tool(self, name: str):
+        """
+        Return a tool by name from either registry.
+        """
+
+        if not isinstance(name, str):
+            return None
+
+        tool = self.tool_registry.get_tool(name)
+
+        if tool:
+            return tool
+
+        return self.mcp_registry.get_tool(name)
+
+    # ------------------------------------------------------
+    # Categories
+    # ------------------------------------------------------
+
+    def categories(self):
+        """
+        Return categories from both registries.
+        """
+
+        categories = []
+
+        for category in self.tool_registry.categories():
+
+            if category not in categories:
+                categories.append(category)
+
+        for category in self.mcp_registry.categories():
+
+            if category not in categories:
+                categories.append(category)
+
+        return categories
+
+    # ------------------------------------------------------
+    # MCP client
+    # ------------------------------------------------------
+
+    def get_mcp_client(self):
+        """
+        Return the combined MCP client.
+
+        The MCP client belongs to MCPRegistry.
+        """
+
+        return self.mcp_registry.get_client()
+
+
+async def create_research_agent(
+    confirmation_manager=None,
+    mode: str = "text",
+):
+    """
+    Build the research agent using separate tool registries.
 
     Args:
         confirmation_manager:
-            Optional voice confirmation manager used by gated tools.
+            Optional confirmation manager used by MCP permission-gated
+            tools.
+
         mode:
-            Agent mode, normally "text" or "voice".
+            Agent mode. Supported values are "text" and "voice".
 
     Returns:
-        tuple: (agent, registry)
+        tuple:
+            (agent, AgentToolRegistry)
     """
+
     if mode not in {"text", "voice"}:
+
         raise ValueError(
             f"Unsupported agent mode: {mode!r}. "
             "Expected 'text' or 'voice'."
         )
 
     try:
-        registry = ToolRegistry(
+
+        # ==================================================
+        # Built-in Tool Registry
+        # ==================================================
+
+        tool_registry = ToolRegistry()
+
+        await tool_registry.initialize()
+
+        built_in_tools = (
+            tool_registry.get_all_tools()
+        )
+
+        logger.info(
+            "Built-in tool registry initialized "
+            "with %d tool(s).",
+            len(built_in_tools),
+        )
+
+        # ==================================================
+        # MCP Registry
+        # ==================================================
+
+        mcp_registry = MCPRegistry(
             confirmation_manager=confirmation_manager,
         )
 
-        await registry.initialize()
+        await mcp_registry.initialize()
 
-        all_tools = registry.get_all_tools()
+        mcp_tools = (
+            mcp_registry.get_all_tools()
+        )
 
         logger.info(
-            "Tool registry initialized with %d tool(s).",
+            "MCP registry initialized "
+            "with %d tool(s).",
+            len(mcp_tools),
+        )
+
+        # ==================================================
+        # Combined Runtime Facade
+        # ==================================================
+
+        registry = AgentToolRegistry(
+            tool_registry=tool_registry,
+            mcp_registry=mcp_registry,
+        )
+
+        all_tools = (
+            registry.get_all_tools()
+        )
+
+        logger.info(
+            "Agent tool set contains %d tool(s).",
             len(all_tools),
         )
 
+        # ==================================================
+        # System Prompt
+        # ==================================================
+
         prompt = get_system_prompt(mode)
+
+        # ==================================================
+        # Create Agent
+        # ==================================================
 
         agent = create_agent(
             model=llm,
@@ -78,10 +286,12 @@ async def create_research_agent(confirmation_manager=None,mode: str = "text",):
         return agent, registry
 
     except Exception:
+
         logger.exception(
             "Failed to create research agent (mode=%s).",
             mode,
         )
+
         raise
 
 
@@ -94,6 +304,7 @@ async def Agent_stream(
     Stream assistant response content from the research agent.
 
     Conversation memory is shared by both text and voice interfaces.
+
     Confirmation rejection/timeout are treated as controlled cancellation
     and are not converted into normal tool results.
     """
@@ -104,17 +315,27 @@ async def Agent_stream(
     query = query.strip()
 
     if not query:
-        logger.debug("Ignoring empty agent query.")
+
+        logger.debug(
+            "Ignoring empty agent query."
+        )
+
         return
 
     full_response = ""
 
     try:
+
+        # --------------------------------------------------
+        # Conversation memory
+        # --------------------------------------------------
+
         memory.add_user_message(query)
 
         messages = memory.get_history()
 
         if not messages:
+
             messages = [
                 {
                     "role": "user",
@@ -127,12 +348,21 @@ async def Agent_stream(
             query,
         )
 
+        # --------------------------------------------------
+        # Agent streaming
+        # --------------------------------------------------
+
         async for chunk in agent.astream(
             {"messages": messages},
             stream_mode="messages",
         ):
+
             if not chunk or len(chunk) != 2:
-                logger.debug("Ignoring malformed agent stream chunk.")
+
+                logger.debug(
+                    "Ignoring malformed agent stream chunk."
+                )
+
                 continue
 
             message, _metadata = chunk
@@ -140,71 +370,140 @@ async def Agent_stream(
             if not message:
                 continue
 
-            msg_type = getattr(message, "type", "")
+            msg_type = getattr(
+                message,
+                "type",
+                "",
+            )
 
             if not isinstance(
                 message,
-                (AIMessage, AIMessageChunk),
-            ) and msg_type not in {"ai", "assistant"}:
+                (
+                    AIMessage,
+                    AIMessageChunk,
+                ),
+            ) and msg_type not in {
+                "ai",
+                "assistant",
+            }:
+
                 continue
 
-            content = getattr(message, "content", "")
+            content = getattr(
+                message,
+                "content",
+                "",
+            )
 
             if not content:
                 continue
 
+            # --------------------------------------------------
+            # Normalize structured content
+            # --------------------------------------------------
+
             if isinstance(content, list):
+
                 text_parts = []
 
                 for item in content:
+
                     if isinstance(item, dict):
-                        text = item.get("text", "")
+
+                        text = item.get(
+                            "text",
+                            "",
+                        )
+
                         if text:
-                            text_parts.append(str(text))
+                            text_parts.append(
+                                str(text)
+                            )
+
                     elif isinstance(item, str):
+
                         text_parts.append(item)
 
-                content = "".join(text_parts)
+                content = "".join(
+                    text_parts
+                )
 
-            if not isinstance(content, str) or not content:
+            if not isinstance(
+                content,
+                str,
+            ) or not content:
+
                 continue
 
             full_response += content
+
             yield content
 
+    # ------------------------------------------------------
+    # Controlled confirmation cancellation
+    # ------------------------------------------------------
+
     except ConfirmationRejected:
+
         logger.info(
             "Action cancelled by user for query: %s",
             query,
         )
+
         return
 
     except ConfirmationTimeout:
+
         logger.info(
             "Confirmation timed out for query: %s",
             query,
         )
+
         return
 
+    # ------------------------------------------------------
+    # Async cancellation
+    # ------------------------------------------------------
+
     except asyncio.CancelledError:
+
         logger.info(
             "Agent response cancelled for query: %s",
             query,
         )
+
         raise
 
+    # ------------------------------------------------------
+    # Unexpected error
+    # ------------------------------------------------------
+
     except Exception:
+
         logger.exception(
             "Agent response failed for query: %s",
             query,
         )
+
         return
 
+    # ------------------------------------------------------
+    # Save assistant response
+    # ------------------------------------------------------
+
     finally:
+
         if full_response:
+
             try:
-                memory.add_assistant_message(full_response)
+
+                memory.add_assistant_message(
+                    full_response
+                )
+
             except Exception:
+
                 logger.exception(
-                    "Failed to save assistant response to conversation memory."
+                    "Failed to save assistant response "
+                    "to conversation memory."
                 )

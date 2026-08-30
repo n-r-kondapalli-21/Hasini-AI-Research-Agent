@@ -41,16 +41,15 @@ async def main() -> None:
             MEMORY_HISTORY_LIMIT,
         )
 
-        print("=" * 50)
-        print("🤖 AI Research Agent - Text Mode")
-        print("=" * 50)
         print("Commands:")
-        print("  /tools")
-        print("  /tools filesystem")
-        print("  /tools github")
-        print("  /tools web")
-        print("  /tool <tool_name>")
-        print("  exit / quit")
+        print("  /tools                  List available tool categories")
+        print("                          Example: /tools")
+        print("  /tools <category>       List tools in a category")
+        print("                          Example: /tools openalgo")
+        print("  /tool <tool_name>       Inspect a specific tool")
+        print("                          Example: /tool openalgo_get_quote")
+        print("  exit / quit             Exit")
+        print("                          Example: exit")
         print("=" * 50)
 
         while True:
