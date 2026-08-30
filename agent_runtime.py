@@ -478,12 +478,24 @@ async def Agent_stream(
     # Unexpected error
     # ------------------------------------------------------
 
-    except Exception:
+    except Exception as e:
 
-        logger.exception(
-            "Agent response failed for query: %s",
-            query,
-        )
+        error_msg = str(e)
+        
+        # Check for specific transient API errors
+        if "overloaded" in error_msg.lower() or "temporarily" in error_msg.lower():
+            logger.warning(
+                "Service temporarily unavailable for query: %s. Error: %s",
+                query,
+                error_msg,
+            )
+            yield "I'm sorry, but the AI service is currently overloaded. Please try again in a moment."
+        else:
+            logger.exception(
+                "Agent response failed for query: %s",
+                query,
+            )
+            yield "I encountered an error processing your request. Please try again."
 
         return
 

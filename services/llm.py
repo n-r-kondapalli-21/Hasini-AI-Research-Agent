@@ -72,8 +72,8 @@ def _build_llm() -> ChatOpenAI:
             model=MODEL_NAME,
             api_key=provider["api_key"],
             base_url=provider["base_url"],
-            timeout=30,
-            max_retries=2,
+            timeout=60,  # Increased timeout for better handling of overloaded services
+            max_retries=3,  # Increased retries for transient failures
         )
     except Exception as exc:
         raise LLMConfigError(
