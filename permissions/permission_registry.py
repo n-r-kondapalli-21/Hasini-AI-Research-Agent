@@ -1,16 +1,15 @@
-
 """
-MCP permission registry and server discovery.
+Permission registry and tool discovery.
 
 Permission definitions are loaded from:
-    mcps/mcp_permissions/mcp_permissions.json
+    permissions/permissions.json
 
 This module is responsible for:
-- Loading MCP permission configuration.
-- Discovering active MCP servers.
-- Assigning HIGH to unknown MCP servers.
-- Validating MCP permission tiers.
-- Resolving MCP tool names to server + method.
+- Loading permission configuration.
+- Discovering active tool servers.
+- Assigning HIGH to unknown tool servers.
+- Validating permission tiers.
+- Resolving tool names to server + method.
 """
 
 from __future__ import annotations
@@ -19,8 +18,7 @@ import fnmatch
 import json
 import logging
 from pathlib import Path
-
-from mcps.mcp_tools import get_active_mcp_servers
+from typing import Callable
 
 
 logger = logging.getLogger("permissions")
@@ -32,7 +30,7 @@ logger = logging.getLogger("permissions")
 
 PERMISSION_CONFIG = (
     Path(__file__).resolve().parent
-    / "mcp_permissions.json"
+    / "permissions.json"
 )
 
 
@@ -56,6 +54,47 @@ DEFAULT_UNKNOWN_TIER = "HIGH"
 REGISTRY: dict = {}
 _RESOLVED_REGISTRY: dict = {}
 
+# Callable to get active tool servers - must be set by the tool system
+_get_active_servers_func: Callable[[], list[str]] | None = None
+
+
+def register_server_discovery_func(func: Callable[[], list[str]]) -> None:
+    """
+    Register a function that returns active tool server IDs.
+    
+    This allows different tool systems (MCP, browser, email, etc.) to
+    provide their own server discovery mechanism.
+    
+    Args:
+        func: A callable that returns a list of server IDs (strings)
+    """
+    global _get_active_servers_func
+    _get_active_servers_func = func
+
+
+def _get_active_servers() -> list[str]:
+    """
+    Get active tool server IDs using the registered discovery function.
+    
+    Returns an empty list if no discovery function is registered.
+    """
+    if _get_active_servers_func is None:
+        logger.warning(
+            "No server discovery function registered. "
+            "Returning empty server list."
+        )
+        return []
+    
+    try:
+        return _get_active_servers_func()
+    except Exception as e:
+        logger.error(
+            "Server discovery function raised an exception: %s",
+            e,
+            exc_info=True,
+        )
+        return []
+
 
 # ---------------------------------------------------------------------------
 # Configuration loading
@@ -63,10 +102,10 @@ _RESOLVED_REGISTRY: dict = {}
 
 def load_permission_registry() -> dict:
     """
-    Load MCP permission definitions from JSON.
+    Load permission definitions from JSON.
 
     Invalid or missing configuration fails closed by returning
-    an empty registry. Unknown MCP servers will subsequently
+    an empty registry. Unknown tool servers will subsequently
     receive HIGH permission.
     """
 
@@ -87,7 +126,7 @@ def load_permission_registry() -> dict:
         REGISTRY = data
 
         logger.info(
-            "Loaded MCP permission registry: %d server(s)",
+            "Loaded permission registry: %d server(s)",
             len(REGISTRY),
         )
 
@@ -96,8 +135,8 @@ def load_permission_registry() -> dict:
         REGISTRY = {}
 
         logger.error(
-            "MCP permission file not found: %s "
-            "— all MCP servers will default to HIGH",
+            "Permission file not found: %s "
+            "— all tool servers will default to HIGH",
             PERMISSION_CONFIG,
         )
 
@@ -107,7 +146,7 @@ def load_permission_registry() -> dict:
 
         logger.error(
             "Invalid JSON in %s: %s "
-            "— all MCP servers will default to HIGH",
+            "— all tool servers will default to HIGH",
             PERMISSION_CONFIG,
             e,
         )
@@ -117,8 +156,8 @@ def load_permission_registry() -> dict:
         REGISTRY = {}
 
         logger.error(
-            "Failed to load MCP permission registry: %s "
-            "— all MCP servers will default to HIGH",
+            "Failed to load permission registry: %s "
+            "— all tool servers will default to HIGH",
             e,
         )
 
@@ -131,7 +170,7 @@ def load_permission_registry() -> dict:
 
 def _validate_tier(tier: str) -> str:
     """
-    Validate an MCP permission tier.
+    Validate a permission tier.
 
     Invalid configuration always falls back to HIGH.
     """
@@ -141,7 +180,7 @@ def _validate_tier(tier: str) -> str:
     if tier not in RISK_TIERS:
 
         logger.warning(
-            "Invalid MCP risk tier '%s' detected "
+            "Invalid risk tier '%s' detected "
             "— defaulting to HIGH",
             tier,
         )
@@ -156,13 +195,13 @@ def _validate_server_config(
     config: dict,
 ) -> dict:
     """
-    Validate and normalize one MCP server permission configuration.
+    Validate and normalize one tool server permission configuration.
     """
 
     if not isinstance(config, dict):
 
         logger.warning(
-            "Invalid permission configuration for MCP server '%s' "
+            "Invalid permission configuration for tool server '%s' "
             "— defaulting to HIGH",
             server_id,
         )
@@ -187,7 +226,7 @@ def _validate_server_config(
     if not isinstance(methods, dict):
 
         logger.warning(
-            "Invalid method permission configuration for MCP server '%s' "
+            "Invalid method permission configuration for tool server '%s' "
             "— ignoring method overrides",
             server_id,
         )
@@ -209,15 +248,15 @@ def _validate_server_config(
 
 
 # ---------------------------------------------------------------------------
-# MCP server discovery
+# Tool server discovery
 # ---------------------------------------------------------------------------
 
 def discover_permissions():
     """
-    Discover currently active MCP servers and build the
+    Discover currently active tool servers and build the
     runtime permission registry.
 
-    Unknown MCP servers automatically receive HIGH.
+    Unknown tool servers automatically receive HIGH.
     """
 
     global _RESOLVED_REGISTRY
@@ -226,10 +265,10 @@ def discover_permissions():
 
     _RESOLVED_REGISTRY = {}
 
-    active_servers = get_active_mcp_servers()
+    active_servers = _get_active_servers()
 
     logger.info(
-        "Discovering MCP servers..."
+        "Discovering tool servers..."
     )
 
     for server_id in active_servers:
@@ -244,7 +283,7 @@ def discover_permissions():
             _RESOLVED_REGISTRY[server_id] = config
 
             logger.info(
-                "Registered MCP server '%s' → %s",
+                "Registered tool server '%s' → %s",
                 server_id,
                 config["default"],
             )
@@ -257,7 +296,7 @@ def discover_permissions():
             }
 
             logger.warning(
-                "Unregistered MCP server '%s' detected "
+                "Unregistered tool server '%s' detected "
                 "— defaulting to HIGH",
                 server_id,
             )
@@ -273,13 +312,13 @@ def discover_permissions():
 
 def _log_resolved_registry() -> None:
     """
-    Log a compact runtime MCP permission table.
+    Log a compact runtime permission table.
     """
 
     if not _RESOLVED_REGISTRY:
 
         logger.info(
-            "Permission tier table: <no MCP servers>"
+            "Permission tier table: <no tool servers>"
         )
 
         return
@@ -306,7 +345,7 @@ def get_server_permission(
     server_id: str,
 ) -> dict:
     """
-    Return the resolved permission configuration for an MCP server.
+    Return the resolved permission configuration for a tool server.
 
     If the runtime registry has not yet been initialized,
     permission discovery is performed automatically.
@@ -334,7 +373,7 @@ def get_permission_tier(
     method_name: str | None = None,
 ) -> str:
     """
-    Resolve the final permission tier for an MCP server + method.
+    Resolve the final permission tier for a tool server + method.
 
     Method-level patterns take priority over the server default.
     """
@@ -363,7 +402,7 @@ def get_permission_tier(
 
 def get_resolved_registry() -> dict:
     """
-    Return a copy of the current runtime MCP permission registry.
+    Return a copy of the current runtime permission registry.
     """
 
     return {
@@ -378,14 +417,14 @@ def get_resolved_registry() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool → MCP server resolution
+# Tool → server resolution
 # ---------------------------------------------------------------------------
 
 def resolve_tool_server(
     tool_name: str,
 ) -> tuple[str, str]:
     """
-    Resolve an adapter-prefixed MCP tool name.
+    Resolve an adapter-prefixed tool name to server + method.
 
     Example:
 

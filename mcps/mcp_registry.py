@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import logging
 
-from mcps.mcp_tools import get_mcp_tools
+from mcps.mcp_clients import get_mcp_tools
 
-from mcps.mcp_permissions.permission_registry import (
+from permissions.permission_registry import (
     discover_permissions,
     resolve_tool_server,
 )
 
-from mcps.mcp_permissions.permission_gated_tool import (
+from permissions.permission_gated_tool import (
     create_permission_gated_tool,
 )
 
@@ -49,18 +49,18 @@ class MCPRegistry:
         """
 
         # --------------------------------------------------
-        # Discover permissions
-        # --------------------------------------------------
-
-        discover_permissions()
-
-        # --------------------------------------------------
-        # Load MCP tools
+        # Load MCP tools first (this connects to servers)
         # --------------------------------------------------
 
         mcp_client, mcp_tools = await get_mcp_tools()
 
         self.mcp_client = mcp_client
+
+        # --------------------------------------------------
+        # Discover permissions (after servers are connected)
+        # --------------------------------------------------
+
+        discover_permissions()
 
         for tool in mcp_tools:
 

@@ -1,5 +1,5 @@
 """
-Permission-gated MCP tool wrapper.
+Permission-gated tool wrapper.
 
 Enhancements over the original version:
   - `logging` (a dedicated "permissions" audit logger) instead of
@@ -20,8 +20,8 @@ Enhancements over the original version:
     can no longer prevent a MEDIUM/HIGH confirmation prompt from being
     shown. It degrades to a generic "server.method" description instead
     of raising — it must never fail in a way that skips confirmation.
-  - Execution outcome (success/failure of the actual `tool.ainvoke`
-    call) is now logged, so the audit trail shows not just "approved"
+  - Execution outcome (success/failure of the actual tool invocation)
+    is now logged, so the audit trail shows not just "approved"
     but "approved and then failed" vs "approved and succeeded" — useful
     for figuring out whether a confirmed action actually did what it
     said it would.
@@ -165,6 +165,9 @@ def create_permission_gated_tool(
 ):
     """
     Create a LangChain-compatible permission-gated tool.
+    
+    This wrapper can be used by any tool system (MCP, browser, email, etc.)
+    to enforce permission-based access control with confirmation requirements.
     """
 
     async def gated_ainvoke(**kwargs: Any):
@@ -239,7 +242,7 @@ def create_permission_gated_tool(
         )
 
         # --------------------------------------------------
-        # ONLY HERE does the original MCP tool execute.
+        # ONLY HERE does the original tool execute.
         # --------------------------------------------------
         return await _execute(tool, kwargs, server_id, method_name)
 

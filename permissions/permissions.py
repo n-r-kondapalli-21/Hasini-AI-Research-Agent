@@ -1,15 +1,14 @@
 """
-Permission registry and MCP server discovery.
+Permission checking and decision logic.
 
 Permission definitions are loaded from:
-    mcps/mcp_permissions/mcp_permissions.json
+    permissions/permissions.json
 
 This module is responsible for:
-- Loading MCP permission configuration.
-- Discovering active MCP servers.
-- Assigning HIGH to unknown MCP servers.
+- Loading permission configuration.
+- Assigning HIGH to unknown tool servers.
 - Validating permission tiers.
-- Resolving MCP tool names to server + method.
+- Resolving tool names to server + method.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from mcps.mcp_permissions.permission_registry import get_permission_tier
+from .permission_registry import get_permission_tier
 
 
 logger = logging.getLogger("hasini.permissions")
@@ -30,8 +29,8 @@ class ToolCall:
     Normalized representation of a tool call.
 
     Attributes:
-        server_id: MCP server that owns the tool.
-        method_name: Actual MCP/LangChain tool name.
+        server_id: Tool server that owns the tool (e.g., 'mcp', 'browser', 'email').
+        method_name: Actual tool/action name.
         arguments: Arguments supplied by the agent.
     """
 

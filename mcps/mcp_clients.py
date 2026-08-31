@@ -19,8 +19,24 @@ from pathlib import Path
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+from permissions.permission_registry import register_server_discovery_func
+
 
 logger = logging.getLogger(__name__)
+
+# Store the list of successfully connected MCP servers
+_connected_mcp_servers: list[str] = []
+
+
+def get_connected_mcp_servers() -> list[str]:
+    """
+    Return the list of MCP servers that successfully connected.
+    """
+    return _connected_mcp_servers
+
+
+# Register the connected servers discovery function with the permission system
+register_server_discovery_func(get_connected_mcp_servers)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +115,8 @@ async def get_mcp_tools():
             (combined MCP client, discovered MCP tools)
     """
 
+    global _connected_mcp_servers
+
     mcp_servers = load_mcp_servers()
 
     if not mcp_servers:
@@ -116,6 +134,7 @@ async def get_mcp_tools():
 
     tools = []
     working_servers = {}
+    _connected_mcp_servers = []
 
     for server_name, server_config in mcp_servers.items():
 
@@ -138,6 +157,7 @@ async def get_mcp_tools():
             tools.extend(server_tools)
 
             working_servers[server_name] = server_config
+            _connected_mcp_servers.append(server_name)
 
             logger.info(
                 "MCP server '%s' connected: %d tool(s) loaded.",
