@@ -14,6 +14,7 @@ from agent_runtime import create_research_agent, Agent_stream
 from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
 from services.conversation_memory import ConversationMemory
 from tool_commands import handle_tool_command
+from text_confirmation import TextConfirmationManager
 
 
 logger = logging.getLogger("hasini.main")
@@ -25,9 +26,13 @@ async def main() -> None:
     logger.info("Starting AI Research Agent in text mode...")
 
     try:
-        agent, registry = await create_research_agent(mode="text")
-
-        logger.info("Starting AI Research Agent in text mode...")
+        # Create text-based confirmation manager for permission-gated tools
+        confirmation_manager = TextConfirmationManager()
+        
+        agent, registry = await create_research_agent(
+            confirmation_manager=confirmation_manager,
+            mode="text"
+        )
 
         memory = ConversationMemory(
             history_limit=MEMORY_HISTORY_LIMIT,
