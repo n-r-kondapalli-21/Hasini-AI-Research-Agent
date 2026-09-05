@@ -48,6 +48,10 @@ if not provider["api_key"]:
 
 Tavily_api_key=os.getenv("TAVILY_API_KEY")
 
+# Set Tavily API key in environment for web_search.py compatibility
+if Tavily_api_key:
+    os.environ["Tavily_api_key"] = Tavily_api_key
+
 # ============================================================
 # Telegram Bot Configuration
 # ============================================================
@@ -66,3 +70,19 @@ MEMORY_HISTORY_LIMIT = int(os.getenv("MEMORY_HISTORY_LIMIT", "10"))
 
 if MEMORY_HISTORY_LIMIT < 2:
     raise ValueError("MEMORY_HISTORY_LIMIT must be at least 2. Check in .env file")
+
+# ============================================================
+# Tool Enable/Disable Flags
+# ============================================================
+
+ENABLE_WEB_TOOL = os.getenv("ENABLE_WEB_TOOL", "true").lower() == "true"
+ENABLE_WEATHER_TOOL = os.getenv("ENABLE_WEATHER_TOOL", "true").lower() == "true"
+ENABLE_CALCULATOR_TOOL = os.getenv("ENABLE_CALCULATOR_TOOL", "true").lower() == "true"
+
+# ============================================================
+# MCP Server Enable/Disable Flags
+# ============================================================
+
+ENABLE_MCP_FILESYSTEM = os.getenv("ENABLE_MCP_FILESYSTEM", "true").lower() == "true"
+ENABLE_MCP_GITHUB = os.getenv("ENABLE_MCP_GITHUB", "true").lower() == "true"
+ENABLE_MCP_OPENALGO = os.getenv("ENABLE_MCP_OPENALGO", "true").lower() == "true"

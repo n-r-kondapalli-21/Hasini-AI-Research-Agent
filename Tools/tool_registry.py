@@ -14,6 +14,11 @@ from __future__ import annotations
 
 import logging
 
+from config import (
+    ENABLE_WEB_TOOL,
+    ENABLE_WEATHER_TOOL,
+    ENABLE_CALCULATOR_TOOL,
+)
 from Tools.web_search import web_tools
 from Tools.weather import weather_tools
 from Tools.calculator import calculator_tool
@@ -43,28 +48,48 @@ class ToolRegistry:
         # Web tools
         # --------------------------------------------------
 
-        self.register(
-            category="web",
-            tools=web_tools,
-        )
+        if ENABLE_WEB_TOOL:
+            # Check if Tavily API key is available
+            try:
+                from Tools.web_search import client as web_client
+                if web_client is not None:
+                    self.register(
+                        category="web",
+                        tools=web_tools,
+                    )
+                    logger.info("Web tool enabled.")
+                else:
+                    logger.warning("Web tool flag is enabled but Tavily API key is missing. Tool will be disabled.")
+            except Exception as e:
+                logger.warning("Failed to initialize web tool: %s. Tool will be disabled.", e)
+        else:
+            logger.info("Web tool disabled.")
 
         # --------------------------------------------------
         # Weather tools
         # --------------------------------------------------
 
-        self.register(
-            category="weather",
-            tools=weather_tools,
-        )
+        if ENABLE_WEATHER_TOOL:
+            self.register(
+                category="weather",
+                tools=weather_tools,
+            )
+            logger.info("Weather tool enabled.")
+        else:
+            logger.info("Weather tool disabled.")
 
         # --------------------------------------------------
         # Calculator tools
         # --------------------------------------------------
 
-        self.register(
-            category="calculator",
-            tools=calculator_tool,
-        )
+        if ENABLE_CALCULATOR_TOOL:
+            self.register(
+                category="calculator",
+                tools=calculator_tool,
+            )
+            logger.info("Calculator tool enabled.")
+        else:
+            logger.info("Calculator tool disabled.")
 
         logger.info(
             "Built-in tool registry initialized with %d tools "

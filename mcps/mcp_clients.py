@@ -19,6 +19,11 @@ from pathlib import Path
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+from config import (
+    ENABLE_MCP_FILESYSTEM,
+    ENABLE_MCP_GITHUB,
+    ENABLE_MCP_OPENALGO,
+)
 from permissions.permission_registry import register_server_discovery_func
 
 
@@ -55,7 +60,7 @@ MCP_SERVER_CONFIG = (
 
 def load_mcp_servers() -> dict:
     """
-    Load MCP server configuration from JSON.
+    Load MCP server configuration from JSON and filter by enable/disable flags.
 
     Environment-variable substitution is intentionally disabled
     for now. Values are used exactly as defined in the JSON file.
@@ -96,7 +101,26 @@ def load_mcp_servers() -> dict:
         )
         return {}
 
-    return servers
+    # Filter servers based on enable/disable flags
+    filtered_servers = {}
+    
+    for server_name, server_config in servers.items():
+        server_enabled = True
+        
+        if server_name == "filesystem" and not ENABLE_MCP_FILESYSTEM:
+            server_enabled = False
+        elif server_name == "github" and not ENABLE_MCP_GITHUB:
+            server_enabled = False
+        elif server_name == "openalgo" and not ENABLE_MCP_OPENALGO:
+            server_enabled = False
+        
+        if server_enabled:
+            filtered_servers[server_name] = server_config
+            logger.info("MCP server '%s' enabled.", server_name)
+        else:
+            logger.info("MCP server '%s' disabled.", server_name)
+    
+    return filtered_servers
 
 
 # ---------------------------------------------------------------------------

@@ -72,8 +72,8 @@ class HasiniTelegramBot:
         self.memory = None
         self.confirmation_manager = None
         self._user_memories = {}  # Dictionary to store per-user conversation memories
-        self._current_update = None  # Store current update for sending messages during agent processing
-        self._current_user_id = None  # Store current user ID for confirmation
+        self._current_updates = {}  # user_id -> Update, for sending messages during agent processing
+        self._active_user_id: Optional[int] = None  # user_id of the in-flight agent request, if any
         self._user_permissions = {}  # Dictionary to store per-user permission pre-approvals
         self._pending_actions = {}  # Dictionary to store pending actions for retry
         self._awaiting_confirmation = {}  # Dictionary to track users awaiting confirmation
@@ -89,12 +89,20 @@ class HasiniTelegramBot:
 
         logger.info("Initializing Telegram bot...")
 
-        # Create Telegram confirmation manager with permission check callback
+        # Create Telegram confirmation manager with permission check callback.
+        #
+        # get_current_user_id_callback lets TelegramConfirmationManager
+        # resolve "which user is this confirmation for" on its own, since
+        # wait_for_confirmation() is invoked from deep inside LangGraph's
+        # tool execution (permission_gated_tool.py) with no user_id
+        # argument at all. We just point it at whichever request is
+        # currently in flight.
         self.confirmation_manager = TelegramConfirmationManager(
             send_message_callback=self._send_admin_message,
-            permission_check_callback=lambda tier: self._has_user_permission(self._current_user_id, tier) if self._current_user_id else False,
+            permission_check_callback=lambda tier: self._has_user_permission(self._active_user_id, tier) if self._active_user_id else False,
             set_pending_action_callback=self._set_pending_action,
-            timeout_seconds=60.0,  # Increased timeout for Telegram users
+            timeout_seconds=100.0,  # Give users a realistic window to notice + reply on Telegram
+            get_current_user_id_callback=lambda: self._active_user_id,
         )
 
         # Create research agent
@@ -106,8 +114,22 @@ class HasiniTelegramBot:
 
         logger.info("Research agent created successfully.")
 
-        # Create Telegram application
-        self.application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        # Create Telegram application.
+        #
+        # IMPORTANT: concurrent_updates=True is required. Without it, PTB's
+        # dispatcher processes updates strictly one at a time and won't even
+        # look at a user's "y"/"n" reply until the handler for their original
+        # request has fully returned. But that handler is suspended awaiting
+        # exactly that reply (inside wait_for_confirmation), so the reply
+        # could never be delivered until the confirmation timed out on its
+        # own — which caused the repeating "asks for permission forever"
+        # behavior.
+        self.application = (
+            Application.builder()
+            .token(TELEGRAM_BOT_TOKEN)
+            .concurrent_updates(True)
+            .build()
+        )
 
         # Register handlers
         self.application.add_handler(CommandHandler("start", self._handle_start))
@@ -170,14 +192,15 @@ class HasiniTelegramBot:
 
     def _set_pending_action(self, tier: str, action_description: str) -> None:
         """Store the pending action for potential retry after permission is granted."""
-        if self._current_user_id:
-            self._pending_actions[self._current_user_id] = {
+        user_id = self._active_user_id
+        if user_id:
+            self._pending_actions[user_id] = {
                 'tier': tier,
                 'action': action_description,
-                'user_message': self._last_user_message.get(self._current_user_id, ''),
+                'user_message': self._last_user_message.get(user_id, ''),
                 'timestamp': asyncio.get_event_loop().time()
             }
-            logger.info(f"Stored pending action for user {self._current_user_id}: {action_description}")
+            logger.info(f"Stored pending action for user {user_id}: {action_description}")
 
     def _get_pending_action(self, user_id: int) -> Optional[dict]:
         """Get and clear the pending action for a user."""
@@ -491,53 +514,26 @@ class HasiniTelegramBot:
         # Check if user is awaiting a confirmation response
         if self._is_awaiting_confirmation(user_id):
             self._clear_awaiting_confirmation(user_id)
-            # Handle confirmation response
-            self.confirmation_manager.handle_confirmation_response(user_message)
-            await update.message.reply_text("Response recorded. Retrying action...")
-            
-            # Retry the original action
-            pending_action = self._get_pending_action(user_id)
-            if pending_action and pending_action['user_message']:
-                # Re-process the original request
-                memory = self._get_user_memory(user_id)
-                await update.message.chat.send_action("typing")
-                
-                try:
-                    # Store current update and user ID for sending messages during agent processing
-                    self._current_update = update
-                    self._current_user_id = user_id
 
-                    response_received = False
-                    full_response = ""
-
-                    async for chunk in Agent_stream(
-                        pending_action['user_message'],  # Use the original user message
-                        self.agent,
-                        memory,
-                    ):
-                        response_received = True
-                        full_response += chunk
-
-                    # Clear the current update and user ID
-                    self._current_update = None
-                    self._current_user_id = None
-
-                    if response_received and full_response:
-                        await update.message.reply_text(full_response)
-                        logger.info(f"Retried action succeeded for user {user_id}")
-                    else:
-                        await update.message.reply_text(
-                            "I didn't generate a response on retry. Please try again."
-                        )
-                        logger.warning(f"No response generated on retry for user {user_id}")
-
-                except Exception as e:
-                    logger.exception(f"Error on retry for user {user_id}")
-                    await update.message.reply_text(
-                        "Sorry, I encountered an error on retry. Please try again."
-                    )
+            if self.confirmation_manager.is_awaiting_confirmation(user_id):
+                # The ORIGINAL request is still alive, suspended inside
+                # wait_for_confirmation() for this user. Just deliver the
+                # answer to it — do NOT start a second Agent_stream run.
+                # The original call will wake up, finish the tool action,
+                # and its own _handle_message invocation will send the
+                # reply.
+                self.confirmation_manager.handle_confirmation_response(user_message, user_id)
+                self._pending_actions.pop(user_id, None)
+                await update.message.reply_text("Response recorded.")
             else:
-                await update.message.reply_text("No pending action to retry. Please send your command again.")
+                # The confirmation window already closed (timed out or was
+                # otherwise resolved) before this reply arrived.
+                self._pending_actions.pop(user_id, None)
+                await update.message.reply_text(
+                    "⏱️ That confirmation window already expired. "
+                    "Please resend your original request if you'd still "
+                    "like me to do this."
+                )
             return
 
         # Store the user message for potential retry
@@ -554,9 +550,12 @@ class HasiniTelegramBot:
         full_response = ""
 
         try:
-            # Store current update and user ID for sending messages during agent processing
-            self._current_update = update
-            self._current_user_id = user_id
+            # Track this update per-user, and mark this user as the
+            # "active" one — this is what get_current_user_id_callback
+            # reads so wait_for_confirmation() (called deep inside
+            # LangGraph with no user_id argument) knows who to ask.
+            self._current_updates[user_id] = update
+            self._active_user_id = user_id
 
             async for chunk in Agent_stream(
                 user_message,
@@ -566,9 +565,9 @@ class HasiniTelegramBot:
                 response_received = True
                 full_response += chunk
 
-            # Clear the current update and user ID
-            self._current_update = None
-            self._current_user_id = None
+            self._current_updates.pop(user_id, None)
+            if self._active_user_id == user_id:
+                self._active_user_id = None
 
             if response_received and full_response:
                 # Send the complete response
@@ -582,34 +581,55 @@ class HasiniTelegramBot:
 
         except asyncio.CancelledError:
             logger.info(f"Agent response cancelled for user {user_id}")
+            self._current_updates.pop(user_id, None)
+            if self._active_user_id == user_id:
+                self._active_user_id = None
             await update.message.reply_text("Response was cancelled. Please try again.")
 
         except Exception as e:
             logger.exception(f"Error processing message for user {user_id}")
+            self._current_updates.pop(user_id, None)
+            if self._active_user_id == user_id:
+                self._active_user_id = None
             await update.message.reply_text(
                 "Sorry, I encountered an error processing your request. Please try again."
             )
 
-    def _send_admin_message(self, message: str) -> None:
+    def _send_admin_message(self, message: str, is_new_request: bool = False) -> None:
         """
-        Send a message to the user for confirmation.
+        Send a message to the user for confirmation, or a follow-up status
+        notice about a confirmation already in progress.
 
-        This is used by the confirmation manager to send confirmation requests.
-        The message is sent immediately if there's a current update context.
+        Args:
+            message: The text to send.
+            is_new_request: True ONLY when this message is the initial
+                permission-request prompt that actually expects a y/n
+                reply. False for follow-up notices ("✅ Action confirmed.",
+                "❌ Action rejected by user.", "❌ Confirmation timed out.").
+
+                This distinction matters: marking the user as "awaiting
+                confirmation" for every message sent through this callback
+                — including the follow-up notices — caused the very next,
+                unrelated message the user sent (e.g. a fresh command) to
+                be wrongly treated as a confirmation reply, and rejected
+                with "that confirmation window already expired" instead of
+                being processed normally. Only the actual permission
+                request should arm that flag.
         """
-        if self._current_update and self._current_update.message:
-            # Set the user state to awaiting confirmation
-            if self._current_user_id:
-                self._set_awaiting_confirmation(self._current_user_id)
-            
+        user_id = self._active_user_id
+        update = self._current_updates.get(user_id) if user_id else None
+
+        if update and update.message:
+            if is_new_request:
+                self._set_awaiting_confirmation(user_id)
+
             # Use asyncio to send the message immediately
             try:
-                import asyncio
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     # Schedule the message to be sent
                     asyncio.create_task(
-                        self._current_update.message.reply_text(message)
+                        update.message.reply_text(message)
                     )
                 else:
                     logger.warning("Event loop not running, cannot send confirmation message")
