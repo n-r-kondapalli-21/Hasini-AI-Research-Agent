@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from agent_runtime import create_research_agent, Agent_stream
 from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
@@ -20,19 +21,53 @@ from text_confirmation import TextConfirmationManager
 logger = logging.getLogger("hasini.main")
 
 
+def _configure_logging() -> None:
+    """Configure application-wide logging before startup work begins."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+
+    # Keep noisy third-party loggers from overwhelming the application logs.
+    for logger_name in (
+        "httpx",
+        "httpcore",
+        "urllib3",
+        "openai",
+        "openai._base_client",
+        "hasini.agent_runtime",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    logger.info("Logging initialized.")
+
+
 async def main() -> None:
     """Run the terminal-based text research agent."""
+
+    startup_start = time.perf_counter()
+    _configure_logging()
 
     logger.info("Starting AI Research Agent in text mode...")
 
     try:
         # Create text-based confirmation manager for permission-gated tools
         confirmation_manager = TextConfirmationManager()
-        
-        agent, registry = await create_research_agent(
-            confirmation_manager=confirmation_manager,
-            mode="text"
-        )
+
+        logger.info("Creating research agent...")
+
+        try:
+            agent, registry = await create_research_agent(
+                confirmation_manager=confirmation_manager,
+                mode="text"
+            )
+        except Exception as exc:
+            logger.error("Failed to create research agent: %s", exc)
+            raise
+
+        logger.debug("Research agent created successfully for text interface.")
 
         memory = ConversationMemory(
             history_limit=MEMORY_HISTORY_LIMIT,
@@ -45,6 +80,11 @@ async def main() -> None:
             MEMORY_ENABLED,
             MEMORY_HISTORY_LIMIT,
         )
+
+        startup_duration = time.perf_counter() - startup_start
+        logger.info("Text system initialized in %.2f seconds.", startup_duration)
+
+        _print_banner()
 
         print("Commands:")
         print("  /tools                  List available tool categories")
@@ -123,6 +163,13 @@ async def main() -> None:
 
     finally:
         logger.info("AI Research Agent text mode stopped.")
+
+
+def _print_banner() -> None:
+    logger.info("Hasini Text Research Agent started.")
+    logger.info("Type your message to start a conversation.")
+    logger.info("Type 'exit' or 'quit' to end the session.")
+    logger.info("Press Ctrl+C to stop.")
 
 
 if __name__ == "__main__":

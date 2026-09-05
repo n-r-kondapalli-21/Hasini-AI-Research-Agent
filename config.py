@@ -48,6 +48,11 @@ if not provider["api_key"]:
 
 Tavily_api_key=os.getenv("TAVILY_API_KEY")
 
+# ============================================================
+# Telegram Bot Configuration
+# ============================================================
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # ============================================================
 # Conversation Memory
