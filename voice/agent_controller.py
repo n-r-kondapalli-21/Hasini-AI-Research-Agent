@@ -165,6 +165,7 @@ class AgentController:
         audio_queue: OrderedAudioQueue = None,
         use_test_response: bool = None,
         test_response: str = TEST_RESPONSE,
+        ui=None,
     ):
 
         self.agent = agent
@@ -182,6 +183,8 @@ class AgentController:
         self.use_test_response = use_test_response
 
         self.test_response = test_response
+
+        self.ui = ui
 
         self.running = False
 
@@ -294,6 +297,10 @@ class AgentController:
 
             logger.info("Processing command: %s", text)
 
+            if self.ui:
+                self.ui.set_user_command(text)
+                self.ui.clear_agent_response()
+
             # ==================================================
             # STREAM AGENT RESPONSE
             # ==================================================
@@ -347,6 +354,9 @@ class AgentController:
                 token = str(token)
 
                 response_parts.append(token)
+
+                if self.ui:
+                    self.ui.append_agent_response(token)
 
                 chunk = segmenter.add(
                     token

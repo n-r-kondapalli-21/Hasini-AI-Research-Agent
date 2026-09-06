@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HASINI AI │ JARVIS HUD CORE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Inter:wght@300;400;600;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="state-idle">
+    <div class="hud-grid-background"></div>
+    
+    <div id="jarvisContainer" class="jarvis-container">
+        <!-- TOP HUD BAR -->
+        <header class="hud-header">
+            <div class="hud-brand">
+                <span class="hud-logo-icon">◈</span>
+                <div class="hud-title-group">
+                    <h1 class="hud-title">HASINI AI <span class="hud-sub-title">JARVIS CORE v3.6</span></h1>
+                    <span class="hud-system-id">SYSTEM ID: HASINI-VOICE-AGENT-ONLINE</span>
+                </div>
+            </div>
+            
+            <div class="hud-status-container">
+                <!-- CONNECTION STATUS INDICATOR -->
+                <div id="wsConnectionStatus" class="ws-connection-badge" title="WebSocket Connection Status">
+                    <span id="wsDot" class="ws-dot ws-disconnected">●</span>
+                    <span id="wsStatusText" class="ws-text">CONNECTING...</span>
+                </div>
+
+                <div id="statusBadge" class="status-badge badge-idle">
+                    <span id="statusIndicator" class="status-dot">●</span>
+                    <span id="statusText" class="status-text">⚪ IDLE</span>
+                </div>
+                <div class="hud-latency-meter">
+                    <span class="hud-label">FPS:</span> <span id="fpsMeter">60</span>
+                    <span class="hud-label">STATE:</span> <span id="rawState">IDLE</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN HUD WORKSPACE -->
+        <main class="hud-main">
+            <!-- LEFT PANEL: USER COMMAND -->
+            <section class="hud-panel panel-left" role="region" aria-label="User Command Panel">
+                <div class="panel-header">
+                    <span class="panel-icon">👤</span>
+                    <h2 class="panel-title">USER COMMAND</h2>
+                    <span class="panel-status-indicator"></span>
+                </div>
+                <div class="panel-body">
+                    <div id="userCommandText" class="user-command-display" aria-live="polite">
+                        <span class="placeholder-text">Waiting for voice command...</span>
+                    </div>
+                </div>
+                <div class="panel-footer">
+                    <span class="telemetry-tag">STT STREAM: ACTIVE</span>
+                </div>
+            </section>
+
+            <!-- CENTER: JARVIS ARC REACTOR VISUALIZER -->
+            <section class="hud-center" role="region" aria-label="Arc Reactor Visualizer Core">
+                <div class="arc-reactor-wrapper">
+                    <canvas id="jarvisCanvas" width="550" height="550"></canvas>
+                    <div class="core-overlay-text">
+                        <span id="coreLabel" class="core-label">HASINI</span>
+                        <span id="coreSubLabel" class="core-sublabel">AWAITING WAKE WORD</span>
+                        <!-- WAVEFORM ON LISTENING -->
+                        <div id="coreAudioWave" class="core-audio-wave" aria-hidden="true">
+                            <span class="wave-bar"></span>
+                            <span class="wave-bar"></span>
+                            <span class="wave-bar"></span>
+                            <span class="wave-bar"></span>
+                            <span class="wave-bar"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RIGHT PANEL: HASINI RESPONSE -->
+            <section class="hud-panel panel-right" role="region" aria-label="Hasini Response Panel">
+                <div class="panel-header">
+                    <span class="panel-icon">🤖</span>
+                    <h2 class="panel-title">HASINI RESPONSE</h2>
+                    <span class="panel-status-indicator"></span>
+                </div>
+                <div class="panel-body">
+                    <div id="agentResponseText" class="agent-response-display" aria-live="polite">
+                        <span class="placeholder-text">Hasini's response will stream live as she speaks...</span>
+                    </div>
+                </div>
+                <div class="panel-footer">
+                    <span class="telemetry-tag">AGENT REASONING &amp; TTS STREAM</span>
+                </div>
+            </section>
+        </main>
+
+        <!-- FOOTER HUD BAR -->
+        <footer class="hud-footer">
+            <div class="footer-item">
+                <span class="hud-key">WAKE WORD:</span>
+                <span class="hud-val">"Hey Jarvis"</span>
+            </div>
+            <div class="footer-item">
+                <span class="hud-key">AUDIO VAD:</span>
+                <span id="vadState" class="hud-val highlight">LISTENING</span>
+            </div>
+            <div class="footer-item">
+                <span class="hud-key">CONTROLS:</span>
+                <span class="hud-val">Press Ctrl+C in terminal to exit</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

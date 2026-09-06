@@ -368,6 +368,7 @@ async def Agent_stream(
             message, _metadata = chunk
 
             if not message:
+                logger.debug("Skipping empty message in stream chunk")
                 continue
 
             msg_type = getattr(
@@ -387,6 +388,10 @@ async def Agent_stream(
                 "assistant",
             }:
 
+                logger.debug(
+                    "Skipping non-AI message of type: %s",
+                    msg_type
+                )
                 continue
 
             content = getattr(
@@ -396,6 +401,7 @@ async def Agent_stream(
             )
 
             if not content:
+                logger.debug("Skipping message with empty content")
                 continue
 
             # --------------------------------------------------
@@ -410,9 +416,16 @@ async def Agent_stream(
 
                     if isinstance(item, dict):
 
+                        # Try multiple possible text fields
                         text = item.get(
                             "text",
-                            "",
+                            ""
+                        ) or item.get(
+                            "content",
+                            ""
+                        ) or item.get(
+                            "value",
+                            ""
                         )
 
                         if text:
@@ -433,6 +446,10 @@ async def Agent_stream(
                 str,
             ) or not content:
 
+                logger.debug(
+                    "Skipping non-string or empty content after normalization: %s",
+                    type(content).__name__
+                )
                 continue
 
             full_response += content
@@ -519,3 +536,12 @@ async def Agent_stream(
                     "Failed to save assistant response "
                     "to conversation memory."
                 )
+        else:
+            # If no response was generated, provide a fallback
+            logger.warning(
+                "No response content generated for query: %s",
+                query
+            )
+            fallback_msg = "I apologize, but I couldn't generate a response. Please try again."
+            yield fallback_msg
+            memory.add_assistant_message(fallback_msg)

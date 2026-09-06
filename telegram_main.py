@@ -118,12 +118,12 @@ class HasiniTelegramBot:
         #
         # IMPORTANT: concurrent_updates=True is required. Without it, PTB's
         # dispatcher processes updates strictly one at a time and won't even
-        # look at a user's "y"/"n" reply until the handler for their original
-        # request has fully returned. But that handler is suspended awaiting
-        # exactly that reply (inside wait_for_confirmation), so the reply
-        # could never be delivered until the confirmation timed out on its
-        # own — which caused the repeating "asks for permission forever"
-        # behavior.
+        # look at a user's confirmation reply until the handler for their
+        # original request has fully returned. But that handler is
+        # suspended awaiting exactly that reply (inside wait_for_confirmation),
+        # so the reply could never be delivered until the confirmation timed
+        # out on its own — which caused the repeating "asks for permission
+        # forever" behavior.
         self.application = (
             Application.builder()
             .token(TELEGRAM_BOT_TOKEN)
@@ -131,7 +131,13 @@ class HasiniTelegramBot:
             .build()
         )
 
-        # Register handlers
+        # Register handlers.
+        #
+        # /yes and /no are registered as their own CommandHandlers (NOT
+        # routed through the generic text MessageHandler below) because
+        # MessageHandler(filters.TEXT & ~filters.COMMAND, ...) deliberately
+        # excludes anything starting with "/" — commands always need their
+        # own handler.
         self.application.add_handler(CommandHandler("start", self._handle_start))
         self.application.add_handler(CommandHandler("help", self._handle_help))
         self.application.add_handler(
@@ -151,6 +157,12 @@ class HasiniTelegramBot:
         )
         self.application.add_handler(
             CommandHandler("permissions", self._handle_permissions)
+        )
+        self.application.add_handler(
+            CommandHandler("yes", self._handle_yes)
+        )
+        self.application.add_handler(
+            CommandHandler("no", self._handle_no)
         )
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
@@ -299,7 +311,9 @@ class HasiniTelegramBot:
                 "/tool <tool_name> - Inspect a specific tool\n"
                 "/grant <tier> - Pre-approve permissions (low/medium/high)\n"
                 "/revoke <tier> - Revoke permission pre-approval\n"
-                "/permissions - Show your current permissions\n\n"
+                "/permissions - Show your current permissions\n"
+                "/yes - Approve a pending permission request\n"
+                "/no - Deny a pending permission request\n\n"
                 "Just send me a message to get started!"
             )
             await update.message.reply_text(welcome_message)
@@ -320,7 +334,9 @@ class HasiniTelegramBot:
                 "/tool <tool_name> - Inspect a specific tool\n"
                 "/grant <tier> - Pre-approve permissions (low/medium/high)\n"
                 "/revoke <tier> - Revoke permission pre-approval\n"
-                "/permissions - Show your current permissions\n\n"
+                "/permissions - Show your current permissions\n"
+                "/yes - Approve a pending permission request\n"
+                "/no - Deny a pending permission request\n\n"
                 "I can help you with:\n"
                 "- Web searches\n"
                 "- Weather information\n"
@@ -496,6 +512,70 @@ class HasiniTelegramBot:
             logger.exception("Error handling /permissions command")
             await update.message.reply_text("Failed to retrieve permissions.")
 
+    async def _handle_yes(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle the /yes command — approve a pending permission request."""
+        if not update.message:
+            return
+        user_id = update.effective_user.id
+        await self._process_confirmation_response(update, user_id, "yes")
+
+    async def _handle_no(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle the /no command — deny a pending permission request."""
+        if not update.message:
+            return
+        user_id = update.effective_user.id
+        await self._process_confirmation_response(update, user_id, "no")
+
+    async def _process_confirmation_response(
+        self, update: Update, user_id: int, response_text: str
+    ) -> None:
+        """
+        Shared logic for handling a confirmation reply, whichever form it
+        arrived in (/yes, /no, or plain-text "yes"/"no" typed as an
+        ordinary message). Keeping this in one place means the command
+        handlers and the text-message handler can never diverge in
+        behavior.
+
+        Args:
+            update: The incoming Telegram update (used to reply).
+            user_id: The user who sent the response.
+            response_text: "yes", "no", or whatever raw text the user sent —
+                passed straight through to
+                TelegramConfirmationManager.handle_confirmation_response,
+                which normalizes it.
+        """
+        if not self._is_awaiting_confirmation(user_id):
+            # /yes or /no sent with nothing pending — don't silently no-op,
+            # tell the user there's nothing to confirm.
+            await update.message.reply_text("There's no pending confirmation to respond to.")
+            return
+
+        self._clear_awaiting_confirmation(user_id)
+
+        if self.confirmation_manager.is_awaiting_confirmation(user_id):
+            # The ORIGINAL request is still alive, suspended inside
+            # wait_for_confirmation() for this user. Just deliver the
+            # answer to it — do NOT start a second Agent_stream run.
+            # The original call will wake up, finish the tool action,
+            # and its own _handle_message invocation will send the
+            # reply.
+            self.confirmation_manager.handle_confirmation_response(response_text, user_id)
+            self._pending_actions.pop(user_id, None)
+            await update.message.reply_text("Response recorded.")
+        else:
+            # The confirmation window already closed (timed out or was
+            # otherwise resolved) before this reply arrived.
+            self._pending_actions.pop(user_id, None)
+            await update.message.reply_text(
+                "⏱️ That confirmation window already expired. "
+                "Please resend your original request if you'd still "
+                "like me to do this."
+            )
+
     async def _handle_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -511,29 +591,11 @@ class HasiniTelegramBot:
 
         logger.info(f"Received message from user {user_id}: {user_message}")
 
-        # Check if user is awaiting a confirmation response
+        # Check if user is awaiting a confirmation response. Plain-text
+        # "yes"/"no" (etc.) still works here as a fallback alongside the
+        # dedicated /yes and /no commands, via the same shared handler.
         if self._is_awaiting_confirmation(user_id):
-            self._clear_awaiting_confirmation(user_id)
-
-            if self.confirmation_manager.is_awaiting_confirmation(user_id):
-                # The ORIGINAL request is still alive, suspended inside
-                # wait_for_confirmation() for this user. Just deliver the
-                # answer to it — do NOT start a second Agent_stream run.
-                # The original call will wake up, finish the tool action,
-                # and its own _handle_message invocation will send the
-                # reply.
-                self.confirmation_manager.handle_confirmation_response(user_message, user_id)
-                self._pending_actions.pop(user_id, None)
-                await update.message.reply_text("Response recorded.")
-            else:
-                # The confirmation window already closed (timed out or was
-                # otherwise resolved) before this reply arrived.
-                self._pending_actions.pop(user_id, None)
-                await update.message.reply_text(
-                    "⏱️ That confirmation window already expired. "
-                    "Please resend your original request if you'd still "
-                    "like me to do this."
-                )
+            await self._process_confirmation_response(update, user_id, user_message)
             return
 
         # Store the user message for potential retry
@@ -603,9 +665,10 @@ class HasiniTelegramBot:
         Args:
             message: The text to send.
             is_new_request: True ONLY when this message is the initial
-                permission-request prompt that actually expects a y/n
-                reply. False for follow-up notices ("✅ Action confirmed.",
-                "❌ Action rejected by user.", "❌ Confirmation timed out.").
+                permission-request prompt that actually expects a reply
+                (via /yes, /no, or plain text). False for follow-up
+                notices ("✅ Action confirmed.", "❌ Action rejected by
+                user.", "❌ Confirmation timed out.").
 
                 This distinction matters: marking the user as "awaiting
                 confirmation" for every message sent through this callback

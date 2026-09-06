@@ -42,6 +42,7 @@ from voice.agent_controller import AgentController
 from voice.barge_in_detector import BargeInDetector
 from voice.state_machine import VoiceStateMachine
 from voice.wake_listener import WakeWordListener
+from voice.ui import VoiceUI
 
 
 logger = logging.getLogger("hasini.voice")
@@ -60,6 +61,9 @@ def _configure_logging() -> None:
         "httpx",
         "httpcore",
         "urllib3",
+        "websockets",
+        "websockets.server",
+        "websockets.protocol",
     ):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
@@ -122,6 +126,7 @@ async def run() -> int:
             capture = AudioCapture()
             broadcaster = AudioBroadcaster(capture)
             state_machine = VoiceStateMachine()
+            ui = VoiceUI(state_machine=state_machine)
 
             # ==========================================================
             # Voice providers
@@ -198,6 +203,7 @@ async def run() -> int:
                 tts=tts,
                 state_machine=state_machine,
                 audio_queue=audio_queue,
+                ui=ui,
             )
 
             # ==========================================================
@@ -249,6 +255,11 @@ async def run() -> int:
                     component,
                     name,
                 )
+
+            await start_and_register(
+                ui,
+                "voice UI",
+            )
 
             await start_and_register(
                 capture,

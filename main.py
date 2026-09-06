@@ -192,7 +192,7 @@ async def main() -> None:
 
 
             if not response_received:
-                logger.debug("No response received for terminal query.")
+                logger.warning("No response received for terminal query - possible content filtering issue")
 
     except KeyboardInterrupt:
         logger.info("Application interrupted by user.")

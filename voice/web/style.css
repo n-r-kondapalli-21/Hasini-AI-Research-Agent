@@ -1,0 +1,488 @@
+/* ==========================================================================
+   JARVIS HUD CORE STYLESHEET - HASINI AI
+   ========================================================================== */
+
+:root {
+    --bg-dark: #040710;
+    --bg-card: rgba(8, 16, 32, 0.75);
+    --border-cyan: rgba(0, 243, 255, 0.25);
+    --border-cyan-glow: rgba(0, 243, 255, 0.6);
+    
+    --color-idle: #00f3ff;
+    --color-listening: #00ff66;
+    --color-processing: #00bfff;
+    --color-speaking: #d946ef;
+    --color-error: #ff3344;
+    
+    --current-accent: var(--color-idle);
+    --font-head: 'Orbitron', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-code: 'Fira Code', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: #f8fafc;
+    font-family: var(--font-body);
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-image: 
+        radial-gradient(circle at 50% 50%, rgba(0, 243, 255, 0.08) 0%, transparent 60%),
+        linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+    background-size: 100% 100%, 40px 40px, 40px 40px;
+}
+
+/* STATE THEME COLOR OVERRIDES */
+body.state-idle {
+    --current-accent: var(--color-idle);
+}
+
+body.state-listening {
+    --current-accent: var(--color-listening);
+}
+
+body.state-processing {
+    --current-accent: var(--color-processing);
+}
+
+body.state-speaking {
+    --current-accent: var(--color-speaking);
+}
+
+body.state-error {
+    --current-accent: var(--color-error);
+}
+
+/* CONTAINER LAYOUT & MICRO-INTERACTION STATE GLOW */
+.jarvis-container {
+    width: 96vw;
+    height: 94vh;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: relative;
+    z-index: 10;
+    border-radius: 16px;
+    border: 1px solid var(--current-accent);
+    box-shadow: 0 0 35px rgba(0, 0, 0, 0.8), inset 0 0 20px rgba(0, 0, 0, 0.7);
+    padding: 12px;
+    transition: border-color 0.5s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.jarvis-container.state-pulse {
+    animation: containerStatePulse 0.5s ease-out;
+}
+
+@keyframes containerStatePulse {
+    0% { transform: scale(0.997); }
+    50% { transform: scale(1.002); }
+    100% { transform: scale(1); }
+}
+
+/* HEADER BAR */
+.hud-header {
+    height: 64px;
+    background: var(--bg-card);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--current-accent);
+    border-radius: 10px;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.hud-brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.hud-logo-icon {
+    font-size: 28px;
+    color: var(--current-accent);
+    text-shadow: 0 0 12px var(--current-accent);
+    animation: rotateSlow 20s linear infinite;
+    transition: color 0.4s ease, text-shadow 0.4s ease;
+}
+
+.hud-title {
+    font-family: var(--font-head);
+    font-size: 20px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #ffffff;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+}
+
+.hud-sub-title {
+    font-size: 11px;
+    color: var(--current-accent);
+    margin-left: 8px;
+    letter-spacing: 1px;
+    transition: color 0.4s ease;
+}
+
+.hud-system-id {
+    font-size: 10px;
+    font-family: var(--font-code);
+    color: #94a3b8;
+    display: block;
+    margin-top: 2px;
+}
+
+.hud-status-container {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* WEBSOCKET CONNECTION BADGE */
+.ws-connection-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-code);
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    padding: 6px 12px;
+    border-radius: 14px;
+}
+
+.ws-dot {
+    font-size: 8px;
+    transition: color 0.3s ease, text-shadow 0.3s ease;
+}
+
+.ws-dot.ws-connected {
+    color: #00ff66;
+    text-shadow: 0 0 8px #00ff66;
+}
+
+.ws-dot.ws-disconnected {
+    color: #ff3344;
+    text-shadow: 0 0 8px #ff3344;
+    animation: pulseDot 0.8s ease-in-out infinite alternate;
+}
+
+.ws-text {
+    color: #cbd5e1;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+/* STATUS BADGE */
+.status-badge {
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-family: var(--font-head);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--current-accent);
+    color: var(--current-accent);
+    box-shadow: 0 0 14px var(--current-accent);
+    transition: all 0.4s ease;
+}
+
+.status-dot {
+    font-size: 10px;
+    animation: pulseDot 1.2s ease-in-out infinite alternate;
+}
+
+.hud-latency-meter {
+    font-family: var(--font-code);
+    font-size: 11px;
+    color: #cbd5e1;
+}
+
+.hud-label {
+    color: #64748b;
+}
+
+/* MAIN WORKSPACE GRID */
+.hud-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 340px 1fr 400px;
+    gap: 16px;
+    min-height: 0;
+}
+
+/* HUD PANELS */
+.hud-panel {
+    background: var(--bg-card);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-cyan);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.hud-panel:hover {
+    border-color: var(--current-accent);
+    box-shadow: 0 0 15px rgba(0, 243, 255, 0.15);
+}
+
+.panel-header {
+    height: 48px;
+    padding: 0 18px;
+    background: rgba(0, 243, 255, 0.05);
+    border-bottom: 1px solid rgba(0, 243, 255, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.panel-icon {
+    font-size: 16px;
+}
+
+.panel-title {
+    font-family: var(--font-head);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--current-accent);
+    transition: color 0.4s ease;
+}
+
+.panel-body {
+    flex: 1;
+    padding: 18px;
+    overflow-y: auto;
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.65;
+    scroll-behavior: smooth;
+}
+
+.panel-footer {
+    height: 32px;
+    padding: 0 18px;
+    background: rgba(0, 0, 0, 0.4);
+    border-top: 1px solid rgba(0, 243, 255, 0.08);
+    display: flex;
+    align-items: center;
+}
+
+.telemetry-tag {
+    font-family: var(--font-code);
+    font-size: 10px;
+    color: #94a3b8;
+    letter-spacing: 1px;
+}
+
+.user-command-display {
+    color: #38bdf8;
+    font-family: var(--font-code);
+    font-size: 14px;
+    word-break: break-word;
+}
+
+.agent-response-display {
+    color: #f8fafc;
+    font-size: 15px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.token-fade-in {
+    display: inline;
+    animation: fadeInToken 0.25s ease-out forwards;
+}
+
+@keyframes fadeInToken {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.placeholder-text {
+    color: #64748b;
+    font-style: italic;
+}
+
+/* CENTER VISUALIZER STAGE */
+.hud-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+}
+
+.arc-reactor-wrapper {
+    position: relative;
+    width: 520px;
+    height: 520px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#jarvisCanvas {
+    width: 520px;
+    height: 520px;
+}
+
+.core-overlay-text {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    text-align: center;
+}
+
+.core-label {
+    font-family: var(--font-head);
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    color: #ffffff;
+    text-shadow: 0 0 14px var(--current-accent);
+    transition: text-shadow 0.4s ease;
+}
+
+.core-sublabel {
+    font-family: var(--font-code);
+    font-size: 10px;
+    color: var(--current-accent);
+    margin-top: 4px;
+    letter-spacing: 1.5px;
+    transition: color 0.4s ease;
+}
+
+/* AUDIO WAVEFORM ON LISTENING */
+.core-audio-wave {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 20px;
+    margin-top: 8px;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+body.state-listening .core-audio-wave {
+    opacity: 1;
+}
+
+.wave-bar {
+    width: 4px;
+    height: 6px;
+    background-color: var(--current-accent);
+    border-radius: 2px;
+    box-shadow: 0 0 6px var(--current-accent);
+    transition: height 0.08s ease, background-color 0.4s ease;
+}
+
+/* FOOTER BAR */
+.hud-footer {
+    height: 48px;
+    background: var(--bg-card);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-cyan);
+    border-radius: 10px;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.footer-item {
+    font-family: var(--font-code);
+    font-size: 11px;
+}
+
+.hud-key {
+    color: #64748b;
+    margin-right: 6px;
+}
+
+.hud-val {
+    color: #cbd5e1;
+}
+
+.hud-val.highlight {
+    color: var(--current-accent);
+    font-weight: 600;
+    transition: color 0.4s ease;
+}
+
+/* KEYFRAMES */
+@keyframes rotateSlow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes pulseDot {
+    from { opacity: 0.4; }
+    to { opacity: 1.0; }
+}
+
+/* RESPONSIVE LAYOUT BREAKDOWN (< 900px) */
+@media (max-width: 900px) {
+    body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        padding: 12px 0;
+    }
+    .jarvis-container {
+        width: 96vw;
+        height: auto;
+        min-height: 96vh;
+    }
+    .hud-main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+    }
+    .hud-center {
+        order: 1;
+        width: 100%;
+    }
+    .panel-left {
+        order: 2;
+        width: 100%;
+        min-height: 180px;
+    }
+    .panel-right {
+        order: 3;
+        width: 100%;
+        min-height: 250px;
+    }
+    .arc-reactor-wrapper, #jarvisCanvas {
+        width: 340px;
+        height: 340px;
+    }
+}

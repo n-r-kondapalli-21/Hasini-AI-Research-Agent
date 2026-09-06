@@ -10,9 +10,9 @@
 
     "github": {
         "transport": "streamable_http",
-        "url": "https://api.githubcopilot.com/mcp/",
+        "url": "${GITHUB_MCP_URL}",
         "headers": {
-            "Authorization": "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"
+            "Authorization": "${GITHUB_TOKEN}"
         }
     },
 
@@ -21,8 +21,8 @@
         "command": "D:\\Algo_Trading_OpenAlgo\\openalgo\\.venv\\Scripts\\python.exe",
         "args": [
             "D:\\Algo_Trading_OpenAlgo\\openalgo\\mcp\\mcpserver.py",
-            "19f8897df3523b8a84a30fc4c73dc9bb037df7057a9d8d6a681c7184335ce3dc",
-            "http://127.0.0.1:5000"
+            "${OPENALGO_API_KEY}",
+            "${OPENALGO_URL}"
         ]
     }
 }

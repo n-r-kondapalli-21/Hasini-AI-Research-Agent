@@ -43,7 +43,8 @@ class TelegramConfirmationManager:
 
     Uses a hybrid system:
     1. Check for pre-approved permissions (via /grant command)
-    2. If not pre-approved, request instant permission with "y" or "yes" response
+    2. If not pre-approved, request instant permission via /yes, /no,
+       or typing "y"/"yes"/"n"/"no" as plain text.
 
     All per-request state is keyed by user_id so concurrent requests from
     different users don't interfere with each other.
@@ -64,13 +65,13 @@ class TelegramConfirmationManager:
             send_message_callback: Function to send messages to Telegram chat.
                 Signature: (message: str, is_new_request: bool) -> None.
                 `is_new_request` is True ONLY for the initial permission-request
-                prompt (the one that actually needs a y/n reply). It is False
+                prompt (the one that actually needs a reply). It is False
                 for follow-up status notices ("confirmed", "rejected", "timed
                 out"). The caller MUST only mark the user as "awaiting
                 confirmation" when is_new_request is True — marking it for
-                every message (including the follow-up status notices) causes
-                the very next unrelated message from the user to be wrongly
-                treated as a confirmation reply. See telegram_main.py's
+                every message (including follow-up notices) causes the very
+                next unrelated message from the user to be wrongly treated
+                as a confirmation reply. See telegram_main.py's
                 _send_admin_message for the correct handling.
             permission_check_callback: Optional function to check if user has pre-approved permission.
                 Takes (tier) argument and returns bool.
@@ -116,10 +117,11 @@ class TelegramConfirmationManager:
         waiting on a response for this specific user (or the resolved
         current user, if user_id is omitted).
 
-        Used by callers (e.g. the Telegram message handler) to distinguish
-        between "the original request is still alive and listening" and
-        "that confirmation window already timed out / closed", so a late
-        reply doesn't trigger a duplicate retry of the original action.
+        Used by callers (e.g. the Telegram message/command handlers) to
+        distinguish between "the original request is still alive and
+        listening" and "that confirmation window already timed out /
+        closed", so a late reply doesn't trigger a duplicate retry of the
+        original action.
         """
         resolved = self._resolve_user_id(user_id)
         return resolved in self._pending_confirmations
@@ -167,22 +169,24 @@ class TelegramConfirmationManager:
         if self.set_pending_action_callback:
             self.set_pending_action_callback(tier_upper, clean_action)
 
-        # Create confirmation message
+        # Create confirmation message. /yes and /no are the recommended
+        # way to respond (no risk of a typo like "yeah" being ignored);
+        # plain-text "y"/"yes"/"n"/"no" still works as a fallback.
         if tier_upper == "HIGH":
             message = (
                 f"⚠️ HIGH RISK PERMISSION REQUIRED\n\n"
                 f"Action: {clean_action}\n\n"
                 f"⚠️ This action could potentially cause data loss or security issues.\n\n"
-                f"Reply with 'y' or 'yes' to ALLOW this action (valid for this action only).\n"
-                f"Reply with 'n' or 'no' to DENY this action.\n\n"
+                f"Tap /yes to ALLOW this action (valid for this action only).\n"
+                f"Tap /no to DENY this action.\n\n"
                 f"Or pre-approve permissions with: /grant {tier_upper.lower()}"
             )
         else:
             message = (
                 f"🔒 PERMISSION REQUIRED ({tier_upper})\n\n"
                 f"Action: {clean_action}\n\n"
-                f"Reply with 'y' or 'yes' to ALLOW this action (valid for this action only).\n"
-                f"Reply with 'n' or 'no' to DENY this action.\n\n"
+                f"Tap /yes to ALLOW this action (valid for this action only).\n"
+                f"Tap /no to DENY this action.\n\n"
                 f"Or pre-approve permissions with: /grant {tier_upper.lower()}"
             )
 
@@ -225,7 +229,10 @@ class TelegramConfirmationManager:
         Handle a user's confirmation response from Telegram.
 
         Args:
-            response: User's text response.
+            response: User's response text. Accepts "/yes", "/no", or the
+                plain-text forms ("y", "yes", "n", "no", "confirm", "ok").
+                Any leading slash is stripped before matching, so /yes and
+                /no are handled identically to typed "yes"/"no".
             user_id: Telegram user ID the response came from. Optional —
                 resolved via get_current_user_id_callback if omitted, though
                 callers that know the user_id (like telegram_main.py) should
@@ -241,7 +248,9 @@ class TelegramConfirmationManager:
             # the original action in this case.
             return
 
-        response_lower = response.strip().lower()
+        # Normalize "/yes" -> "yes", "/no" -> "no", etc., so command-based
+        # and plain-text responses are handled by the exact same logic.
+        response_lower = response.strip().lower().lstrip("/")
         tier = self._current_tiers.get(resolved_user_id, "MEDIUM")
 
         if tier == "HIGH":

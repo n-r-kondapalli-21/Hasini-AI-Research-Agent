@@ -1,5 +1,6 @@
 import logging
 from enum import Enum, auto
+from typing import Callable
 
 
 logger = logging.getLogger("hasini.voice.state_machine")
@@ -50,6 +51,7 @@ class VoiceStateMachine:
 
     def __init__(self):
         self.state = VoiceState.IDLE
+        self._listeners: list[Callable[[VoiceState, VoiceState], None]] = []
 
         self._transition_table = {
             # IDLE
@@ -130,6 +132,24 @@ class VoiceStateMachine:
             self.state.name,
         )
 
+    def add_listener(self, callback: Callable[[VoiceState, VoiceState], None]) -> None:
+        """Register a callback to be notified of state transitions."""
+        if callback not in self._listeners:
+            self._listeners.append(callback)
+
+    def remove_listener(self, callback: Callable[[VoiceState, VoiceState], None]) -> None:
+        """Remove a registered state change callback."""
+        if callback in self._listeners:
+            self._listeners.remove(callback)
+
+    def _notify_listeners(self, previous_state: VoiceState, new_state: VoiceState) -> None:
+        """Safely notify listeners without allowing exceptions to break pipeline."""
+        for listener in list(self._listeners):
+            try:
+                listener(previous_state, new_state)
+            except Exception:
+                logger.exception("Error in voice state change listener callback.")
+
     def handle_event(self, event: VoiceEvent) -> VoiceState:
         """
         Handle an event and transition to the next state.
@@ -166,6 +186,8 @@ class VoiceStateMachine:
             self.state.name,
         )
 
+        self._notify_listeners(previous_state, self.state)
+
         return self.state
 
     def can_handle(self, event: VoiceEvent) -> bool:
@@ -188,5 +210,6 @@ class VoiceStateMachine:
                 "Voice state reset: %s → IDLE",
                 previous_state.name,
             )
+            self._notify_listeners(previous_state, self.state)
         else:
             logger.debug("Voice state machine already in IDLE state.")

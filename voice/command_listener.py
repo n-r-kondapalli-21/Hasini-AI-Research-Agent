@@ -609,6 +609,9 @@ class CommandListener:
 
             text = text.strip() if text else ""
 
+            if text and getattr(self.agent_controller, "ui", None):
+                self.agent_controller.ui.set_user_command(text)
+
             logger.info(
                 "Transcription: %s",
                 text if text else "<empty>",

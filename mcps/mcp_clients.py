@@ -8,15 +8,18 @@ Responsible for:
 - Returning a combined MCP client.
 - Reporting active configured MCP servers.
 
-Environment-variable substitution is intentionally not used yet.
+Environment-variable substitution is enabled using ${VAR_NAME} syntax.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from config import (
@@ -26,6 +29,8 @@ from config import (
 )
 from permissions.permission_registry import register_server_discovery_func
 
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +63,51 @@ MCP_SERVER_CONFIG = (
 # Configuration loading
 # ---------------------------------------------------------------------------
 
+def substitute_env_vars(value):
+    """
+    Recursively substitute environment variables in configuration values.
+    
+    Supports ${VAR_NAME} syntax. If the environment variable is not set,
+    the placeholder is left unchanged.
+    
+    Args:
+        value: Configuration value (str, dict, list, or other)
+        
+    Returns:
+        Configuration value with environment variables substituted
+    """
+    if isinstance(value, str):
+        # Pattern to match ${VAR_NAME}
+        pattern = r'\$\{([^}]+)\}'
+        
+        def replace_var(match):
+            var_name = match.group(1)
+            env_value = os.environ.get(var_name)
+            if env_value is None:
+                logger.warning(
+                    "Environment variable '%s' not set, keeping placeholder",
+                    var_name,
+                )
+                return match.group(0)  # Keep the placeholder
+            return env_value
+        
+        return re.sub(pattern, replace_var, value)
+    
+    elif isinstance(value, dict):
+        return {k: substitute_env_vars(v) for k, v in value.items()}
+    
+    elif isinstance(value, list):
+        return [substitute_env_vars(item) for item in value]
+    
+    else:
+        return value
+
+
 def load_mcp_servers() -> dict:
     """
     Load MCP server configuration from JSON and filter by enable/disable flags.
 
-    Environment-variable substitution is intentionally disabled
-    for now. Values are used exactly as defined in the JSON file.
+    Environment-variable substitution is enabled using ${VAR_NAME} syntax.
     """
 
     try:
@@ -100,6 +144,9 @@ def load_mcp_servers() -> dict:
             "MCP server configuration must contain a JSON object."
         )
         return {}
+
+    # Substitute environment variables in the configuration
+    servers = substitute_env_vars(servers)
 
     # Filter servers based on enable/disable flags
     filtered_servers = {}
