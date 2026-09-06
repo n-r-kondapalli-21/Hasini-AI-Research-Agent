@@ -2,7 +2,7 @@
 Hasini text-mode entrypoint.
 
 The shared research-agent runtime lives in agent_runtime.py.
-This file is responsible only for the terminal/text interface.
+This file is responsible only for the terminal/text interface with Rich styling.
 """
 
 from __future__ import annotations
@@ -10,6 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from agent_runtime import create_research_agent, Agent_stream
 from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
@@ -19,6 +24,7 @@ from text_confirmation import TextConfirmationManager
 
 
 logger = logging.getLogger("hasini.main")
+console = Console()
 
 
 def _configure_logging() -> None:
@@ -44,8 +50,48 @@ def _configure_logging() -> None:
     logger.info("Logging initialized.")
 
 
+def _print_rich_banner(startup_duration: float) -> None:
+    """Display a stylized Rich startup banner with system info and instructions."""
+    banner_text = Text()
+    banner_text.append("🚀 AI Research Agent initialized in ", style="dim white")
+    banner_text.append(f"{startup_duration:.2f}s\n", style="bold green")
+
+    memory_status = "Enabled" if MEMORY_ENABLED else "Disabled"
+    memory_style = "bold green" if MEMORY_ENABLED else "bold red"
+    banner_text.append("🧠 Conversation Memory: ", style="bold white")
+    banner_text.append(f"{memory_status}", style=memory_style)
+    banner_text.append(f" (History Limit: {MEMORY_HISTORY_LIMIT})\n\n", style="dim white")
+
+    banner_text.append("Available Commands:\n", style="bold yellow")
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/tools", style="bold cyan")
+    banner_text.append("                  List available tool categories\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/tools <category>", style="bold cyan")
+    banner_text.append("       List tools in a specific category\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/tool <tool_name>", style="bold cyan")
+    banner_text.append("       Inspect detailed tool schema & docs\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("exit / quit", style="bold cyan")
+    banner_text.append("             Exit the session\n", style="white")
+
+    panel = Panel(
+        banner_text,
+        title="🤖 [bold bright_cyan]HASINI AI RESEARCH AGENT[/bold bright_cyan] 🤖",
+        subtitle="[dim]Type your message below to begin research[/dim]",
+        border_style="bright_blue",
+        padding=(1, 2),
+    )
+    console.print()
+    console.print(panel)
+
+
 async def main() -> None:
-    """Run the terminal-based text research agent."""
+    """Run the terminal-based text research agent with Rich CLI UI."""
 
     startup_start = time.perf_counter()
     _configure_logging()
@@ -54,18 +100,23 @@ async def main() -> None:
 
     try:
         # Create text-based confirmation manager for permission-gated tools
-        confirmation_manager = TextConfirmationManager()
+        confirmation_manager = TextConfirmationManager(console=console)
 
         logger.info("Creating research agent...")
 
-        try:
-            agent, registry = await create_research_agent(
-                confirmation_manager=confirmation_manager,
-                mode="text"
-            )
-        except Exception as exc:
-            logger.error("Failed to create research agent: %s", exc)
-            raise
+        with console.status(
+            "[bold bright_cyan]Initializing Hasini Research Agent & MCP Tools...[/bold bright_cyan]",
+            spinner="dots",
+        ):
+            try:
+                agent, registry = await create_research_agent(
+                    confirmation_manager=confirmation_manager,
+                    mode="text"
+                )
+            except Exception as exc:
+                logger.error("Failed to create research agent: %s", exc)
+                console.print(f"\n[bold red]❌ Failed to create research agent: {exc}[/bold red]")
+                raise
 
         logger.debug("Research agent created successfully for text interface.")
 
@@ -74,88 +125,78 @@ async def main() -> None:
             enabled=MEMORY_ENABLED,
         )
 
-        logger.info(
-            "Conversation memory initialized "
-            "(enabled=%s, history_limit=%d).",
-            MEMORY_ENABLED,
-            MEMORY_HISTORY_LIMIT,
-        )
-
         startup_duration = time.perf_counter() - startup_start
         logger.info("Text system initialized in %.2f seconds.", startup_duration)
 
-        _print_banner()
-
-        print("Commands:")
-        print("  /tools                  List available tool categories")
-        print("                          Example: /tools")
-        print("  /tools <category>       List tools in a category")
-        print("                          Example: /tools openalgo")
-        print("  /tool <tool_name>       Inspect a specific tool")
-        print("                          Example: /tool openalgo_get_quote")
-        print("  exit / quit             Exit")
-        print("                          Example: exit")
-        print("=" * 50)
+        _print_rich_banner(startup_duration)
 
         while True:
             try:
-                user_input = input("\nYou: ").strip()
+                console.print("\n[bold cyan]You[/bold cyan] [dim]>[/dim] ", end="")
+                user_input = input().strip()
 
             except (EOFError, KeyboardInterrupt):
                 logger.info("Terminal input interrupted.")
-                print("\nGoodbye!")
+                console.print("\n\n[bold yellow]👋 Goodbye![/bold yellow]")
                 break
 
             if user_input.lower() in {"exit", "quit"}:
                 logger.info("Exit command received.")
-                print("\nGoodbye!")
+                console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
                 break
 
             if not user_input:
                 continue
 
             try:
-                if handle_tool_command(user_input, registry):
+                if handle_tool_command(user_input, registry, console=console):
                     continue
             except Exception:
                 logger.exception(
                     "Tool command failed: %s",
                     user_input,
                 )
-                print("\n❌ Tool command failed.")
+                console.print("\n[bold red]❌ Tool command execution failed.[/bold red]")
                 continue
-
-            print("\nHasini: ", end="", flush=True)
 
             response_received = False
 
             try:
-                async for chunk in Agent_stream(
-                    user_input,
-                    agent,
-                    memory,
-                ):
-                    response_received = True
-                    print(chunk, end="", flush=True)
+                with console.status(
+                    "[bold bright_cyan]Hasini is thinking...[/bold bright_cyan]",
+                    spinner="dots",
+                ) as status:
+                    async for chunk in Agent_stream(
+                        user_input,
+                        agent,
+                        memory,
+                    ):
+                        if not response_received:
+                            status.stop()
+                            console.print("\n[bold bright_green]Hasini[/bold bright_green] [dim]>[/dim] ", end="")
+                            response_received = True
+                        console.print(chunk, end="")
 
             except asyncio.CancelledError:
                 logger.info("Agent response cancelled.")
-                print("\n")
+                console.print("\n")
                 raise
 
             except Exception:
                 logger.exception(
                     "Unexpected error while processing terminal query."
                 )
-                print("\n❌ Failed to process the request.")
+                console.print("\n[bold red]❌ Failed to process the request.[/bold red]")
 
-            print()
+            console.print()
+
 
             if not response_received:
                 logger.debug("No response received for terminal query.")
 
     except KeyboardInterrupt:
         logger.info("Application interrupted by user.")
+        console.print("\n[bold yellow]Application interrupted by user.[/bold yellow]")
 
     except Exception:
         logger.exception("Research agent text application failed.")
@@ -165,15 +206,9 @@ async def main() -> None:
         logger.info("AI Research Agent text mode stopped.")
 
 
-def _print_banner() -> None:
-    logger.info("Hasini Text Research Agent started.")
-    logger.info("Type your message to start a conversation.")
-    logger.info("Type 'exit' or 'quit' to end the session.")
-    logger.info("Press Ctrl+C to stop.")
-
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Application interrupted by user.")
+

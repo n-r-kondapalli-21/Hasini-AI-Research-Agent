@@ -14,7 +14,11 @@ import logging
 # These are used by the agent runtime for proper error handling
 from voice.confirmation import ConfirmationRejected, ConfirmationTimeout
 
+from rich.console import Console
+from rich.panel import Panel
+
 logger = logging.getLogger("hasini.text_confirmation")
+_console = Console()
 
 
 class TextConfirmationManager:
@@ -24,14 +28,16 @@ class TextConfirmationManager:
     Prompts the user in the terminal when a tool action requires permission confirmation.
     """
 
-    def __init__(self, timeout_seconds: float = 15.0):
+    def __init__(self, timeout_seconds: float = 15.0, console: Console | None = None):
         """
         Initialize the text confirmation manager.
         
         Args:
             timeout_seconds: How long to wait for user input before timing out.
+            console: Rich Console instance.
         """
         self.timeout_seconds = timeout_seconds
+        self.console = console or _console
 
     async def wait_for_confirmation(
         self,
@@ -55,44 +61,60 @@ class TextConfirmationManager:
         tier_upper = str(tier).upper().strip()
         clean_action = str(action_description).rstrip(".")
 
-        print("\n" + "=" * 50)
         if tier_upper == "HIGH":
-            print("⚠️  [HIGH RISK PERMISSION REQUIRED]")
-            print(f"Action: {clean_action}")
-            print("Type 'yes' or 'confirm' to ALLOW this high-risk action.")
+            panel_content = (
+                f"[bold white]Action:[/bold white] [bright_red]{clean_action}[/bright_red]\n\n"
+                f"[bold yellow]⚠️  This action has significant impact. Type 'yes' or 'confirm' to ALLOW.[/bold yellow]"
+            )
+            panel = Panel(
+                panel_content,
+                title="🔥 [bold white on red] HIGH RISK PERMISSION REQUIRED [/bold white on red]",
+                border_style="bold red",
+                expand=False,
+            )
         else:
-            print("🔒 [PERMISSION REQUIRED]")
-            print(f"Action: {clean_action}")
-            print("Allow this action? (y/n)")
-        print("=" * 50)
+            panel_content = (
+                f"[bold white]Action:[/bold white] [yellow]{clean_action}[/yellow]\n\n"
+                f"[bold cyan]Allow this action? (y/n)[/bold cyan]"
+            )
+            panel = Panel(
+                panel_content,
+                title="🔒 [bold black on yellow] PERMISSION REQUIRED [/bold black on yellow]",
+                border_style="yellow",
+                expand=False,
+            )
+
+        self.console.print()
+        self.console.print(panel)
 
         loop = asyncio.get_running_loop()
         try:
             user_resp = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
-                    lambda: input("Confirmation: ").strip().lower(),
+                    lambda: input("Confirmation > ").strip().lower(),
                 ),
                 timeout=self.timeout_seconds,
             )
         except (EOFError, KeyboardInterrupt):
-            print("\n❌ Confirmation cancelled.")
+            self.console.print("\n[bold red]❌ Confirmation cancelled by user.[/bold red]")
             raise ConfirmationRejected()
         except asyncio.TimeoutError:
-            print("\n❌ Confirmation timed out.")
+            self.console.print("\n[bold red]❌ Confirmation timed out.[/bold red]")
             raise ConfirmationTimeout()
 
         if tier_upper == "HIGH":
             if user_resp in {"yes", "confirm"}:
-                print("✅ Action confirmed.")
+                self.console.print("[bold green]✅ Action confirmed.[/bold green]")
                 return True
             else:
-                print("❌ Action rejected by user.")
+                self.console.print("[bold red]❌ Action rejected by user.[/bold red]")
                 raise ConfirmationRejected()
         else:
             if user_resp in {"y", "yes", "confirm", "ok"}:
-                print("✅ Action confirmed.")
+                self.console.print("[bold green]✅ Action confirmed.[/bold green]")
                 return True
             else:
-                print("❌ Action rejected by user.")
+                self.console.print("[bold red]❌ Action rejected by user.[/bold red]")
                 raise ConfirmationRejected()
+
