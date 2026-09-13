@@ -31,13 +31,17 @@ class TextConfirmationManager:
     def __init__(self, timeout_seconds: float = 15.0, console: Console | None = None):
         """
         Initialize the text confirmation manager.
-        
+
         Args:
             timeout_seconds: How long to wait for user input before timing out.
             console: Rich Console instance.
         """
         self.timeout_seconds = timeout_seconds
         self.console = console or _console
+        # Injected by main.py to point at the active Rich spinner before each
+        # agent call. We stop it here before calling input() so that Rich's
+        # Live display doesn't hold the terminal in a mode that swallows stdin.
+        self._active_status = None
 
     async def wait_for_confirmation(
         self,
@@ -84,6 +88,21 @@ class TextConfirmationManager:
                 expand=False,
             )
 
+        # ── CRITICAL FIX ────────────────────────────────────────────────────
+        # Stop the Rich spinner/status *before* printing the panel and calling
+        # input(). When a Rich Live display (console.status) is active it holds
+        # the terminal in a mode that intercepts raw stdin — the user's y/n
+        # keystrokes are swallowed and never reach input(). main.py keeps
+        # _active_status pointing to the current spinner; we stop it here and
+        # clear the reference so the finally block in main.py is a safe no-op.
+        if self._active_status is not None:
+            try:
+                self._active_status.stop()
+            except Exception:
+                logger.debug("Failed to stop active status before confirmation prompt.", exc_info=True)
+            self._active_status = None
+        # ────────────────────────────────────────────────────────────────────
+
         self.console.print()
         self.console.print(panel)
 
@@ -117,4 +136,3 @@ class TextConfirmationManager:
             else:
                 self.console.print("[bold red]❌ Action rejected by user.[/bold red]")
                 raise ConfirmationRejected()
-

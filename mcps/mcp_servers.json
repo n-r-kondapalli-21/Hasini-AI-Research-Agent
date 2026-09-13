@@ -4,7 +4,7 @@
         "transport": "stdio",
         "command": "mcp-server-filesystem",
         "args": [
-            "D:\\Hasini_Ai_Research_Agent\\AI_Research"
+            "${AI_RESEARCH_DIR:-./AI_Research}"
         ]
     },
 
@@ -18,9 +18,9 @@
 
     "openalgo": {
         "transport": "stdio",
-        "command": "D:\\Algo_Trading_OpenAlgo\\openalgo\\.venv\\Scripts\\python.exe",
+        "command": "${OPENALGO_PYTHON_PATH:-python}",
         "args": [
-            "D:\\Algo_Trading_OpenAlgo\\openalgo\\mcp\\mcpserver.py",
+            "${OPENALGO_MCP_SERVER:-./mcp/mcpserver.py}",
             "${OPENALGO_API_KEY}",
             "${OPENALGO_URL}"
         ]

@@ -101,6 +101,10 @@ async def main() -> None:
     try:
         # Create text-based confirmation manager for permission-gated tools
         confirmation_manager = TextConfirmationManager(console=console)
+        # _active_status is updated each iteration so the confirmation manager
+        # can stop the spinner before calling input() — otherwise Rich's Live
+        # display swallows stdin and the user's y/n keystrokes go nowhere.
+        confirmation_manager._active_status = None
 
         logger.info("Creating research agent...")
 
@@ -162,10 +166,17 @@ async def main() -> None:
             response_received = False
 
             try:
-                with console.status(
+                status = console.status(
                     "[bold bright_cyan]Hasini is thinking...[/bold bright_cyan]",
                     spinner="dots",
-                ) as status:
+                )
+                status.start()
+                # Give the confirmation manager a reference to the active
+                # spinner so it can stop it before calling input().
+                # If it doesn't stop first, Rich's Live display holds the
+                # terminal in a mode that swallows stdin entirely.
+                confirmation_manager._active_status = status
+                try:
                     async for chunk in Agent_stream(
                         user_input,
                         agent,
@@ -173,9 +184,13 @@ async def main() -> None:
                     ):
                         if not response_received:
                             status.stop()
+                            confirmation_manager._active_status = None
                             console.print("\n[bold bright_green]Hasini[/bold bright_green] [dim]>[/dim] ", end="")
                             response_received = True
                         console.print(chunk, end="")
+                finally:
+                    status.stop()
+                    confirmation_manager._active_status = None
 
             except asyncio.CancelledError:
                 logger.info("Agent response cancelled.")

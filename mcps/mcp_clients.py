@@ -67,7 +67,8 @@ def substitute_env_vars(value):
     """
     Recursively substitute environment variables in configuration values.
     
-    Supports ${VAR_NAME} syntax. If the environment variable is not set,
+    Supports ${VAR_NAME} and ${VAR_NAME:-default} syntax.
+    If the environment variable is not set and no default is provided,
     the placeholder is left unchanged.
     
     Args:
@@ -77,19 +78,35 @@ def substitute_env_vars(value):
         Configuration value with environment variables substituted
     """
     if isinstance(value, str):
-        # Pattern to match ${VAR_NAME}
+        # Pattern to match ${VAR_NAME} or ${VAR_NAME:-default}
         pattern = r'\$\{([^}]+)\}'
         
         def replace_var(match):
-            var_name = match.group(1)
-            env_value = os.environ.get(var_name)
-            if env_value is None:
-                logger.warning(
-                    "Environment variable '%s' not set, keeping placeholder",
-                    var_name,
-                )
-                return match.group(0)  # Keep the placeholder
-            return env_value
+            var_spec = match.group(1)
+            
+            # Check for default value syntax ${VAR:-default}
+            if ':-' in var_spec:
+                var_name, default_value = var_spec.split(':-', 1)
+                env_value = os.environ.get(var_name)
+                if env_value is None:
+                    logger.debug(
+                        "Environment variable '%s' not set, using default: %s",
+                        var_name,
+                        default_value,
+                    )
+                    return default_value
+                return env_value
+            else:
+                # Simple ${VAR_NAME} syntax
+                var_name = var_spec
+                env_value = os.environ.get(var_name)
+                if env_value is None:
+                    logger.warning(
+                        "Environment variable '%s' not set, keeping placeholder",
+                        var_name,
+                    )
+                    return match.group(0)  # Keep the placeholder
+                return env_value
         
         return re.sub(pattern, replace_var, value)
     
