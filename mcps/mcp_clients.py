@@ -179,6 +179,13 @@ def load_mcp_servers() -> dict:
             server_enabled = False
         
         if server_enabled:
+            # Normalize Authorization header format if present (ensure Bearer prefix if missing)
+            headers = server_config.get("headers", {})
+            if "Authorization" in headers and isinstance(headers["Authorization"], str):
+                auth_val = headers["Authorization"].strip()
+                if auth_val and not auth_val.startswith("${") and not auth_val.lower().startswith(("bearer ", "token ", "basic ")):
+                    headers["Authorization"] = f"Bearer {auth_val}"
+
             filtered_servers[server_name] = server_config
             logger.info("MCP server '%s' enabled.", server_name)
         else:
@@ -255,9 +262,19 @@ async def get_mcp_tools():
 
         except Exception as e:
 
-            logger.exception(
-                "MCP server '%s' failed to connect and will be skipped.",
+            err_msg = str(e)
+            if hasattr(e, "exceptions") and e.exceptions:
+                err_msg = "; ".join(str(sub_e) for sub_e in e.exceptions)
+
+            logger.warning(
+                "MCP server '%s' failed to connect (%s) and will be skipped.",
                 server_name,
+                err_msg,
+            )
+            logger.debug(
+                "Traceback for MCP server '%s' connection failure:",
+                server_name,
+                exc_info=True,
             )
 
     # ------------------------------------------------------------------
