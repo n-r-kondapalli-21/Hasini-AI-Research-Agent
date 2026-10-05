@@ -261,6 +261,9 @@ RAG_ENABLED=true
 # Persistent vector database path
 CHROMADB_PATH=./knowledge_base/chroma_db
 
+# Persistent BM25 index path
+BM25_INDEX_PATH=./models/bm25_index
+
 # Embedding model
 RAG_EMBEDDING_MODEL=all-MiniLM-L6-v2
 

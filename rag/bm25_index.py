@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
-from config import RAG_BM25_INDEX_PATH
+from config import BM25_INDEX_PATH
 
 logger = logging.getLogger("hasini.rag.bm25_index")
 
@@ -28,10 +28,10 @@ class BM25Index:
         Initialize BM25 index with persistent storage.
 
         Args:
-            index_path: Path to store BM25 index data. Defaults to models/bm25_index/.
+            index_path: Path to store BM25 index data. Defaults to BM25_INDEX_PATH from config/env.
         """
         if index_path is None:
-            self.index_path = Path(RAG_BM25_INDEX_PATH).resolve()
+            self.index_path = Path(BM25_INDEX_PATH).resolve()
         else:
             self.index_path = Path(index_path).resolve()
 
