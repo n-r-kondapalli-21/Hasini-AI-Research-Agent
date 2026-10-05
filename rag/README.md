@@ -78,7 +78,7 @@ Configure the RAG Knowledge System in your root `.env` file:
 RAG_ENABLED=true
 
 # Path to persistent ChromaDB storage directory
-CHROMADB_PATH=./data/chroma_db
+CHROMADB_PATH=./knowledge_base/chroma_db
 
 # Local embedding model storage directory (relative to project root)
 RAG_EMBEDDING_MODEL_PATH=models/embeddings/all-MiniLM-L6-v2

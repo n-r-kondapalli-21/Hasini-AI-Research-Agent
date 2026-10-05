@@ -63,6 +63,8 @@ htmlcov/
 
 # Data & Vector Databases (RAG)
 data/
+knowledge_base/
+knowledge_source/
 *.sqlite
 *.sqlite3
 *.db

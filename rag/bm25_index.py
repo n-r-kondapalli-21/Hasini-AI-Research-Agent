@@ -28,10 +28,10 @@ class BM25Index:
         Initialize BM25 index with persistent storage.
 
         Args:
-            index_path: Path to store BM25 index data. Defaults to data/bm25_index/.
+            index_path: Path to store BM25 index data. Defaults to knowledge_base/bm25_index/.
         """
         if index_path is None:
-            # Default to data/bm25_index/ alongside ChromaDB
+            # Default to knowledge_base/bm25_index/ alongside ChromaDB
             db_dir = Path(CHROMADB_PATH).parent
             self.index_path = db_dir / "bm25_index"
         else:

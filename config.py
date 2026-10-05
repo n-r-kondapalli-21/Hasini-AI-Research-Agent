@@ -92,7 +92,7 @@ ENABLE_MCP_OPENALGO = os.getenv("ENABLE_MCP_OPENALGO", "true").lower() == "true"
 # ============================================================
 
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
-CHROMADB_PATH = os.getenv("CHROMADB_PATH", "./data/chroma_db")
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", "./knowledge_base/chroma_db")
 RAG_EMBEDDING_MODEL_NAME = os.getenv("RAG_EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 RAG_EMBEDDING_MODEL_PATH = os.getenv("RAG_EMBEDDING_MODEL_PATH", "models/embeddings/all-MiniLM-L6-v2")
 RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", RAG_EMBEDDING_MODEL_NAME)

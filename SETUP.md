@@ -259,7 +259,7 @@ Hasini includes an independent RAG-based Knowledge System backed by ChromaDB. Th
 RAG_ENABLED=true
 
 # Persistent vector database path
-CHROMADB_PATH=./data/chroma_db
+CHROMADB_PATH=./knowledge_base/chroma_db
 
 # Embedding model
 RAG_EMBEDDING_MODEL=all-MiniLM-L6-v2

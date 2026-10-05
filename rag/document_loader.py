@@ -34,7 +34,7 @@ class RAGDocumentLoader:
         Load text and metadata from a file path or URL.
 
         Args:
-            source: File path (e.g., 'data/report.pdf') or URL ('https://example.com/article')
+            source: File path (e.g., 'knowledge_source/report.pdf') or URL ('https://example.com/article')
 
         Returns:
             Dict containing 'content', 'source', 'filename', and 'file_type'.
