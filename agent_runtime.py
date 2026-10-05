@@ -26,12 +26,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, AIMessageChunk
 
-from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
+from config import (
+    MEMORY_ENABLED,
+    MEMORY_HISTORY_LIMIT,
+    RAG_ENABLED,
+)
 
 from services.conversation_memory import ConversationMemory
 from services.llm import llm
@@ -49,6 +53,69 @@ from voice.confirmation import (
 
 
 logger = logging.getLogger("hasini.agent_runtime")
+
+# Global RAG retriever instance (initialized once at startup)
+_rag_retriever: Optional["RAGRetriever"] = None
+
+
+def initialize_rag_system() -> Optional["RAGRetriever"]:
+    """
+    Initialize the RAG system once at startup.
+
+    This function loads ChromaDB, local embedding model, BM25 index,
+    and cross-encoder reranker once, so they can be reused for all queries.
+
+    Returns:
+        RAGRetriever instance if RAG is enabled, None otherwise.
+    """
+    global _rag_retriever
+
+    if not RAG_ENABLED:
+        logger.info("RAG is disabled in configuration. Skipping initialization.")
+        return None
+
+    if _rag_retriever is not None:
+        logger.debug("RAG system already initialized. Reusing existing instance.")
+        return _rag_retriever
+
+    try:
+        from rag.retriever import RAGRetriever
+        from rag.vector_store import RAGVectorStore
+        from rag.bm25_index import BM25Index
+
+        logger.info("Initializing RAG system (ChromaDB + BM25 + Cross-Encoder)...")
+
+        # Initialize vector store (loads embedding model)
+        vector_store = RAGVectorStore()
+        logger.info("ChromaDB vector store initialized.")
+
+        # Initialize BM25 index
+        bm25_index = BM25Index()
+        logger.info("BM25 keyword index initialized.")
+
+        # Initialize retriever (loads cross-encoder if enabled)
+        _rag_retriever = RAGRetriever(
+            vector_store=vector_store,
+            bm25_index=bm25_index,
+        )
+        logger.info("RAG retriever initialized with hybrid search capabilities.")
+
+        return _rag_retriever
+
+    except Exception as exc:
+        logger.error("Failed to initialize RAG system: %s", exc)
+        logger.warning("RAG will be unavailable for this session.")
+        return None
+
+
+def get_rag_retriever() -> Optional["RAGRetriever"]:
+    """
+    Get the cached RAG retriever instance.
+
+    Returns:
+        RAGRetriever instance if initialized, None otherwise.
+    """
+    return _rag_retriever
 
 
 class AgentToolRegistry:
@@ -332,7 +399,7 @@ async def Agent_stream(
 
         memory.add_user_message(query)
 
-        messages = memory.get_history()
+        messages = list(memory.get_history())
 
         if not messages:
 
@@ -342,6 +409,27 @@ async def Agent_stream(
                     "content": query,
                 }
             ]
+
+        # --------------------------------------------------
+        # RAG Knowledge Retrieval
+        # --------------------------------------------------
+        active_messages = list(messages)
+        try:
+            retriever = get_rag_retriever()
+            if retriever:
+                rag_context = await asyncio.to_thread(
+                    retriever.get_formatted_context,
+                    query
+                )
+                if rag_context:
+                    logger.info("Injecting RAG knowledge context into agent query execution.")
+                    last_msg = dict(active_messages[-1])
+                    last_msg["content"] = f"{rag_context}\n\nUser Question:\n{query}"
+                    active_messages[-1] = last_msg
+            else:
+                logger.debug("RAG retriever not available (disabled or failed to initialize).")
+        except Exception as rag_err:
+            logger.warning("RAG retrieval failed (continuing without RAG context): %s", rag_err)
 
         logger.info(
             "Processing agent query: %s",
@@ -353,7 +441,7 @@ async def Agent_stream(
         # --------------------------------------------------
 
         async for chunk in agent.astream(
-            {"messages": messages},
+            {"messages": active_messages},
             stream_mode="messages",
         ):
 

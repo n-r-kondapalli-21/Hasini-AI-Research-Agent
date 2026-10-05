@@ -16,10 +16,13 @@ import time
 import asyncio
 import logging
 import signal
-import sys
+import warnings
 from contextlib import AsyncExitStack
 
-from agent_runtime import create_research_agent, Agent_stream
+# Suppress all warnings before any imports
+warnings.filterwarnings("ignore")
+
+from agent_runtime import create_research_agent, Agent_stream, initialize_rag_system
 from services.conversation_memory import ConversationMemory
 from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
 
@@ -44,30 +47,10 @@ from voice.state_machine import VoiceStateMachine
 from voice.wake_listener import WakeWordListener
 from voice.ui import VoiceUI
 
+from logging_config import configure_logging, get_logger
 
-logger = logging.getLogger("hasini.voice")
 
-def _configure_logging() -> None:
-    """Configure application-wide logging before startup work begins."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        force=True,
-    )
-
-    # Keep noisy third-party loggers from overwhelming the application logs.
-    for logger_name in (
-        "httpx",
-        "httpcore",
-        "urllib3",
-        "websockets",
-        "websockets.server",
-        "websockets.protocol",
-    ):
-        logging.getLogger(logger_name).setLevel(logging.WARNING)
-
-    logger.info("Logging initialized.")
+logger = get_logger("hasini.voice")
 
 
 class HasiniStartupError(RuntimeError):
@@ -94,7 +77,7 @@ async def run() -> int:
     """Start and run the Hasini voice interface."""
 
     startup_start = time.perf_counter()
-    _configure_logging()
+    configure_logging(console_level=logging.WARNING, file_level=logging.DEBUG)
 
     shutdown_event = asyncio.Event()
 
@@ -154,6 +137,12 @@ async def run() -> int:
             # Audio playback queue
             # ==========================================================
             audio_queue = OrderedAudioQueue()
+
+            # ==========================================================
+            # RAG System Initialization
+            # ==========================================================
+            logger.info("Initializing RAG system...")
+            initialize_rag_system()
 
             # ==========================================================
             # Research agent

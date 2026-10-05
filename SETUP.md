@@ -248,6 +248,68 @@ Try:
 - `/help` - Get help
 - Send a message to test response
 
+## RAG Knowledge System Setup
+
+Hasini includes an independent RAG-based Knowledge System backed by ChromaDB. This is a manually managed knowledge repository (not automatic chat history memory).
+
+### Configuration (`.env`)
+
+```env
+# Enable/disable RAG retrieval
+RAG_ENABLED=true
+
+# Persistent vector database path
+CHROMADB_PATH=./data/chroma_db
+
+# Embedding model
+RAG_EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+# Top-K relevant chunks count
+RAG_TOP_K=5
+
+# Similarity threshold (0.0 to 1.0)
+RAG_SIMILARITY_THRESHOLD=0.3
+```
+
+### Managing Documents
+
+Use `rag_manage.py` or terminal `/rag` commands to index, list, search, or remove documents:
+
+```bash
+# Add a document file (PDF, TXT, DOCX, Markdown) or web URL
+python rag_manage.py add path/to/document.pdf
+python rag_manage.py add https://example.com/article
+
+# List all indexed documents
+python rag_manage.py list
+
+# Test RAG search retrieval
+python rag_manage.py search "quantum computing"
+
+# View statistics
+python rag_manage.py stats
+
+# Remove a document
+python rag_manage.py remove path/to/document.pdf
+
+# Clear entire knowledge base
+python rag_manage.py clear
+```
+
+Inside text terminal mode (`main.py`), you can also use slash commands directly:
+- `/rag list`
+- `/rag add <path_or_url>`
+- `/rag remove <path_or_url>`
+- `/rag search <query>`
+- `/rag stats`
+- `/rag clear`
+
+### Running RAG Unit Tests
+
+```bash
+python test_rag.py
+```
+
 ## Troubleshooting
 
 ### Audio Issues (Voice Interface)

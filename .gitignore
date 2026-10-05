@@ -1,4 +1,4 @@
-# Python
+# Python & Bytecode
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,44 +19,72 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+*.manifest
+*.spec
 
-# Virtual Environment
+# Virtual Environments
 venv/
 env/
 ENV/
-.venv
+.venv/
+env.bak/
+venv.bak/
 
-# Environment
+# Environment Secrets
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+*.pem
+*.key
 
-# IDE
+# IDE & OS System Files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+nul
+NUL
 
-# Testing
+# Testing & Coverage
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .hypothesis/
 *.cover
+.cache/
 
-# Models
-/models/
+# Data & Vector Databases (RAG)
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.pkl
+*.pickle
+*.parquet
+*.index
+
+# Models & Weights
+models/
 *.bin
 *.pt
 *.pth
 *.onnx
 *.safetensors
 *.gguf
+*.h5
+*.ckpt
+*.tflite
+*.engine
 
-# Runtime files
+# Runtime files & Audio Outputs
 runtime/
 *.wav
 *.mp3
@@ -64,10 +92,12 @@ runtime/
 *.flac
 *.aac
 *.m4a
+*.pcm
 
 # Logs
 *.log
 logs/
+
 
 
 

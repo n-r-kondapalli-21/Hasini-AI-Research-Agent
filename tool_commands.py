@@ -203,13 +203,127 @@ def handle_tool_command(
 
             return True
 
+        # --------------------------------------------------
+        # /rag commands
+        # --------------------------------------------------
+        if command.lower().startswith("/rag"):
+            _handle_rag_command(command, console=console)
+            return True
+
     except Exception:
         logger.exception(
             "Failed to handle tool command: %s",
             command,
         )
-        console.print("\n[bold red]❌ Failed to process the tool command.[/bold red]")
+        console.print("\n[bold red]❌ Failed to process the command.[/bold red]")
         return True
 
     return False
+
+
+def _handle_rag_command(command: str, console: Console | None = None) -> None:
+    """Handle /rag commands in terminal interface."""
+    if console is None:
+        console = _default_console
+
+    parts = command.strip().split(maxsplit=2)
+    subcmd = parts[1].lower() if len(parts) > 1 else "stats"
+    target = parts[2] if len(parts) > 2 else ""
+
+    try:
+        from rag.indexer import RAGIndexer
+        from rag.retriever import RAGRetriever
+        from rag.vector_store import RAGVectorStore
+
+        indexer = RAGIndexer()
+        retriever = RAGRetriever(vector_store=indexer.vector_store)
+
+        if subcmd == "list":
+            docs = indexer.list_documents()
+            if not docs:
+                console.print("\n[yellow]No documents indexed in RAG Knowledge Base.[/yellow]")
+                return
+        if subcmd == "list":
+            docs = indexer.list_documents()
+            if not docs:
+                console.print("\n[yellow]No documents indexed in RAG Knowledge Base.[/yellow]")
+                return
+            table = Table(title="Hasini RAG Knowledge Base Documents", border_style="cyan")
+            table.add_column("Filename", style="bold green")
+            table.add_column("Type", style="cyan")
+            table.add_column("Chunks", style="yellow", justify="right")
+            table.add_column("Indexed At", style="dim white")
+            table.add_column("Source", style="dim cyan")
+            for d in docs:
+                table.add_row(
+                    d.get("filename", "N/A"),
+                    d.get("file_type", "N/A"),
+                    str(d.get("chunk_count", 0)),
+                    d.get("timestamp", "N/A"),
+                    d.get("source", "N/A"),
+                )
+            console.print()
+            console.print(table)
+
+        elif subcmd == "add":
+            if not target:
+                console.print("\n[bold red][ERROR]: Please provide a file path or URL to add: /rag add <path_or_url>[/bold red]")
+                return
+            console.print(f"\n[bold cyan]Indexing document/URL:[/bold cyan] {target}")
+            res = indexer.index_document(target)
+            if res["success"]:
+                console.print(f"[bold green][OK]:[/bold green] {res['message']}")
+            else:
+                console.print(f"[bold red][ERROR]:[/bold red] {res['message']}")
+
+        elif subcmd == "remove":
+            if not target:
+                console.print("\n[bold red][ERROR]: Please provide a file path or URL to remove: /rag remove <path_or_url>[/bold red]")
+                return
+            res = indexer.remove_document(target)
+            if res["success"]:
+                console.print(f"\n[bold green][OK]:[/bold green] {res['message']}")
+            else:
+                console.print(f"\n[bold red][ERROR]:[/bold red] {res['message']}")
+
+        elif subcmd == "search":
+            if not target:
+                console.print("\n[bold red][ERROR]: Please provide a search query: /rag search <query>[/bold red]")
+                return
+            chunks = retriever.retrieve(query=target)
+            if not chunks:
+                console.print("\n[yellow]No relevant chunks found above similarity threshold.[/yellow]")
+                return
+            console.print(f"\n[bold green]Found {len(chunks)} relevant chunk(s):[/bold green]\n")
+            for idx, c in enumerate(chunks, 1):
+                meta = c["metadata"]
+                title = f"Chunk {idx} | Source: {meta.get('filename')} | Similarity: {c['similarity']:.4f}"
+                console.print(Panel(c["text"], title=title, border_style="green"))
+
+        elif subcmd == "stats":
+            stats = indexer.vector_store.get_stats()
+            from config import RAG_ENABLED, RAG_EMBEDDING_MODEL, RAG_TOP_K, RAG_SIMILARITY_THRESHOLD
+            console.print()
+            console.print(Panel(
+                f"[bold white]Status:[/bold white] [{'green' if RAG_ENABLED else 'red'}]{'ENABLED' if RAG_ENABLED else 'DISABLED'}[/]\n"
+                f"[bold white]Storage Path:[/bold white] {stats['db_path']}\n"
+                f"[bold white]Embedding Model:[/bold white] {RAG_EMBEDDING_MODEL}\n"
+                f"[bold white]Total Unique Documents:[/bold white] {stats['total_documents']}\n"
+                f"[bold white]Total Text Chunks:[/bold white] {stats['total_chunks']}\n"
+                f"[bold white]Top-K Default:[/bold white] {RAG_TOP_K}\n"
+                f"[bold white]Similarity Threshold:[/bold white] {RAG_SIMILARITY_THRESHOLD}",
+                title="RAG Knowledge System Statistics",
+                border_style="bright_blue",
+            ))
+
+        elif subcmd == "clear":
+            count = indexer.clear_all()
+            console.print(f"\n[bold green][OK]:[/bold green] Cleared {count} chunk(s) from knowledge base.")
+
+        else:
+            console.print(f"\n[yellow]Unknown /rag command: '{subcmd}'. Available: list, add, remove, search, stats, clear.[/yellow]")
+
+    except Exception as exc:
+        logger.exception("Failed to execute /rag command: %s", command)
+        console.print(f"\n[bold red][ERROR]: Error executing RAG command: {exc}[/bold red]")
 

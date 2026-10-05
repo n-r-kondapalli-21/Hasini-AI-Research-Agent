@@ -86,3 +86,44 @@ ENABLE_CALCULATOR_TOOL = os.getenv("ENABLE_CALCULATOR_TOOL", "true").lower() == 
 ENABLE_MCP_FILESYSTEM = os.getenv("ENABLE_MCP_FILESYSTEM", "true").lower() == "true"
 ENABLE_MCP_GITHUB = os.getenv("ENABLE_MCP_GITHUB", "true").lower() == "true"
 ENABLE_MCP_OPENALGO = os.getenv("ENABLE_MCP_OPENALGO", "true").lower() == "true"
+
+# ============================================================
+# RAG Knowledge System Configuration
+# ============================================================
+
+RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
+CHROMADB_PATH = os.getenv("CHROMADB_PATH", "./data/chroma_db")
+RAG_EMBEDDING_MODEL_NAME = os.getenv("RAG_EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+RAG_EMBEDDING_MODEL_PATH = os.getenv("RAG_EMBEDDING_MODEL_PATH", "models/embeddings/all-MiniLM-L6-v2")
+RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", RAG_EMBEDDING_MODEL_NAME)
+
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+RAG_SIMILARITY_THRESHOLD = float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.3"))
+
+# ============================================================
+# Hybrid Search Configuration
+# ============================================================
+
+# Enable/disable BM25 keyword search
+RAG_BM25_ENABLED = os.getenv("RAG_BM25_ENABLED", "true").lower() == "true"
+
+# Number of top results from vector search before fusion
+RAG_VECTOR_TOP_K = int(os.getenv("RAG_VECTOR_TOP_K", "10"))
+
+# Number of top results from BM25 search before fusion
+RAG_BM25_TOP_K = int(os.getenv("RAG_BM25_TOP_K", "10"))
+
+# RRF constant k (default 60 as per original paper)
+RAG_RRF_K = int(os.getenv("RAG_RRF_K", "60"))
+
+# Enable/disable cross-encoder reranking
+RAG_RERANKER_ENABLED = os.getenv("RAG_RERANKER_ENABLED", "true").lower() == "true"
+
+# Number of top candidates to pass to reranker
+RAG_RERANKER_TOP_K = int(os.getenv("RAG_RERANKER_TOP_K", "20"))
+
+# Reranker relevance threshold (0.0 to disable filtering)
+RAG_RERANKER_THRESHOLD = float(os.getenv("RAG_RERANKER_THRESHOLD", "0.0"))
+
+# Final number of chunks to return after all processing
+RAG_FINAL_TOP_K = int(os.getenv("RAG_FINAL_TOP_K", "5"))

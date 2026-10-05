@@ -10,44 +10,26 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import warnings
+
+# Suppress all warnings before any imports
+warnings.filterwarnings("ignore")
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from agent_runtime import create_research_agent, Agent_stream
+from agent_runtime import create_research_agent, Agent_stream, initialize_rag_system
 from config import MEMORY_ENABLED, MEMORY_HISTORY_LIMIT
 from services.conversation_memory import ConversationMemory
 from tool_commands import handle_tool_command
 from text_confirmation import TextConfirmationManager
+from logging_config import configure_logging, get_logger
 
 
-logger = logging.getLogger("hasini.main")
+logger = get_logger("hasini.main")
 console = Console()
-
-
-def _configure_logging() -> None:
-    """Configure application-wide logging before startup work begins."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        force=True,
-    )
-
-    # Keep noisy third-party loggers from overwhelming the application logs.
-    for logger_name in (
-        "httpx",
-        "httpcore",
-        "urllib3",
-        "openai",
-        "openai._base_client",
-        "hasini.agent_runtime",
-    ):
-        logging.getLogger(logger_name).setLevel(logging.WARNING)
-
-    logger.info("Logging initialized.")
 
 
 def _print_rich_banner(startup_duration: float) -> None:
@@ -60,24 +42,96 @@ def _print_rich_banner(startup_duration: float) -> None:
     memory_style = "bold green" if MEMORY_ENABLED else "bold red"
     banner_text.append("🧠 Conversation Memory: ", style="bold white")
     banner_text.append(f"{memory_status}", style=memory_style)
-    banner_text.append(f" (History Limit: {MEMORY_HISTORY_LIMIT})\n\n", style="dim white")
+    banner_text.append(f" (History Limit: {MEMORY_HISTORY_LIMIT})\n", style="dim white")
+
+    from config import RAG_ENABLED, RAG_SIMILARITY_THRESHOLD, RAG_BM25_ENABLED, RAG_RERANKER_ENABLED
+    rag_status = "Enabled" if RAG_ENABLED else "Disabled"
+    rag_style = "bold green" if RAG_ENABLED else "bold red"
+    banner_text.append("📚 RAG Knowledge Base: ", style="bold white")
+    banner_text.append(f"{rag_status}", style=rag_style)
+
+    if RAG_ENABLED:
+        features = []
+        if RAG_BM25_ENABLED:
+            features.append("BM25")
+        if RAG_RERANKER_ENABLED:
+            features.append("Reranker")
+        if features:
+            banner_text.append(f" ({', '.join(features)})", style="dim white")
+
+    banner_text.append(f" (Threshold: {RAG_SIMILARITY_THRESHOLD})\n\n", style="dim white")
 
     banner_text.append("Available Commands:\n", style="bold yellow")
     banner_text.append("  • ", style="cyan")
+    banner_text.append("/rag <list|add|remove|stats>", style="bold cyan")
+    banner_text.append("  Manage RAG knowledge base\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
     banner_text.append("/tools", style="bold cyan")
-    banner_text.append("                  List available tool categories\n", style="white")
+    banner_text.append("                       List available tool categories\n", style="white")
 
     banner_text.append("  • ", style="cyan")
     banner_text.append("/tools <category>", style="bold cyan")
-    banner_text.append("       List tools in a specific category\n", style="white")
+    banner_text.append("            List tools in a specific category\n", style="white")
 
     banner_text.append("  • ", style="cyan")
     banner_text.append("/tool <tool_name>", style="bold cyan")
-    banner_text.append("       Inspect detailed tool schema & docs\n", style="white")
+    banner_text.append("            Inspect detailed tool schema & docs\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("exit / quit / /exit", style="bold cyan")
+    banner_text.append("              Exit the session\n", style="white")
+
+    panel = Panel(
+        banner_text,
+        title="🤖 [bold bright_cyan]HASINI AI RESEARCH AGENT[/bold bright_cyan] 🤖",
+        subtitle="[dim]Type your message below to begin research[/dim]",
+        border_style="bright_blue",
+        padding=(1, 2),
+    )
+    console.print()
+    console.print(panel)
+
+
+def _print_rich_banner(startup_duration: float) -> None:
+    """Display a stylized Rich startup banner with system info and instructions."""
+    banner_text = Text()
+    banner_text.append("🚀 AI Research Agent initialized in ", style="dim white")
+    banner_text.append(f"{startup_duration:.2f}s\n", style="bold green")
+
+    memory_status = "Enabled" if MEMORY_ENABLED else "Disabled"
+    memory_style = "bold green" if MEMORY_ENABLED else "bold red"
+    banner_text.append("🧠 Conversation Memory: ", style="bold white")
+    banner_text.append(f"{memory_status}", style=memory_style)
+    banner_text.append(f" (History Limit: {MEMORY_HISTORY_LIMIT})\n", style="dim white")
+
+    from config import RAG_ENABLED, RAG_SIMILARITY_THRESHOLD
+    rag_status = "Enabled" if RAG_ENABLED else "Disabled"
+    rag_style = "bold green" if RAG_ENABLED else "bold red"
+    banner_text.append("📚 RAG Knowledge Base: ", style="bold white")
+    banner_text.append(f"{rag_status}", style=rag_style)
+    banner_text.append(f" (Threshold: {RAG_SIMILARITY_THRESHOLD})\n\n", style="dim white")
+
+    banner_text.append("Available Commands:\n", style="bold yellow")
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/rag <list|add|remove|stats>", style="bold cyan")
+    banner_text.append("  Manage RAG knowledge base\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/tools", style="bold cyan")
+    banner_text.append("                       List available tool categories\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/tools <category>", style="bold cyan")
+    banner_text.append("            List tools in a specific category\n", style="white")
+
+    banner_text.append("  • ", style="cyan")
+    banner_text.append("/tool <tool_name>", style="bold cyan")
+    banner_text.append("            Inspect detailed tool schema & docs\n", style="white")
 
     banner_text.append("  • ", style="cyan")
     banner_text.append("exit / quit", style="bold cyan")
-    banner_text.append("             Exit the session\n", style="white")
+    banner_text.append("                  Exit the session\n", style="white")
 
     panel = Panel(
         banner_text,
@@ -94,11 +148,18 @@ async def main() -> None:
     """Run the terminal-based text research agent with Rich CLI UI."""
 
     startup_start = time.perf_counter()
-    _configure_logging()
+    configure_logging(console_level=logging.WARNING, file_level=logging.DEBUG)
 
     logger.info("Starting AI Research Agent in text mode...")
 
     try:
+        # Initialize RAG system once at startup
+        with console.status(
+            "[bold bright_cyan]Initializing RAG Knowledge System...[/bold bright_cyan]",
+            spinner="dots",
+        ):
+            initialize_rag_system()
+
         # Create text-based confirmation manager for permission-gated tools
         confirmation_manager = TextConfirmationManager(console=console)
         # _active_status is updated each iteration so the confirmation manager
@@ -144,8 +205,9 @@ async def main() -> None:
                 console.print("\n\n[bold yellow]👋 Goodbye![/bold yellow]")
                 break
 
-            if user_input.lower() in {"exit", "quit"}:
-                logger.info("Exit command received.")
+            # Handle exit commands
+            if user_input.lower() in {"exit", "quit", "/exit"}:
+                logger.info("Exit command received: %s", user_input)
                 console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
                 break
 
