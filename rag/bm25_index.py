@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from collections import defaultdict
 
-from config import CHROMADB_PATH
+from config import RAG_BM25_INDEX_PATH
 
 logger = logging.getLogger("hasini.rag.bm25_index")
 
@@ -28,12 +28,10 @@ class BM25Index:
         Initialize BM25 index with persistent storage.
 
         Args:
-            index_path: Path to store BM25 index data. Defaults to knowledge_base/bm25_index/.
+            index_path: Path to store BM25 index data. Defaults to models/bm25_index/.
         """
         if index_path is None:
-            # Default to knowledge_base/bm25_index/ alongside ChromaDB
-            db_dir = Path(CHROMADB_PATH).parent
-            self.index_path = db_dir / "bm25_index"
+            self.index_path = Path(RAG_BM25_INDEX_PATH).resolve()
         else:
             self.index_path = Path(index_path).resolve()
 

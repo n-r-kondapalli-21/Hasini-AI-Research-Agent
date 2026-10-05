@@ -106,6 +106,7 @@ RAG_SIMILARITY_THRESHOLD = float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.3"))
 
 # Enable/disable BM25 keyword search
 RAG_BM25_ENABLED = os.getenv("RAG_BM25_ENABLED", "true").lower() == "true"
+RAG_BM25_INDEX_PATH = os.getenv("RAG_BM25_INDEX_PATH", "models/bm25_index")
 
 # Number of top results from vector search before fusion
 RAG_VECTOR_TOP_K = int(os.getenv("RAG_VECTOR_TOP_K", "10"))
