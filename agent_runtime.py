@@ -410,27 +410,6 @@ async def Agent_stream(
                 }
             ]
 
-        # --------------------------------------------------
-        # RAG Knowledge Retrieval
-        # --------------------------------------------------
-        active_messages = list(messages)
-        try:
-            retriever = get_rag_retriever()
-            if retriever:
-                rag_context = await asyncio.to_thread(
-                    retriever.get_formatted_context,
-                    query
-                )
-                if rag_context:
-                    logger.info("Injecting RAG knowledge context into agent query execution.")
-                    last_msg = dict(active_messages[-1])
-                    last_msg["content"] = f"{rag_context}\n\nUser Question:\n{query}"
-                    active_messages[-1] = last_msg
-            else:
-                logger.debug("RAG retriever not available (disabled or failed to initialize).")
-        except Exception as rag_err:
-            logger.warning("RAG retrieval failed (continuing without RAG context): %s", rag_err)
-
         logger.info(
             "Processing agent query: %s",
             query,
@@ -441,7 +420,7 @@ async def Agent_stream(
         # --------------------------------------------------
 
         async for chunk in agent.astream(
-            {"messages": active_messages},
+            {"messages": messages},
             stream_mode="messages",
         ):
 

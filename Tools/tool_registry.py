@@ -18,10 +18,13 @@ from config import (
     ENABLE_WEB_TOOL,
     ENABLE_WEATHER_TOOL,
     ENABLE_CALCULATOR_TOOL,
+    RAG_ENABLED,
 )
 from Tools.web_search import web_tools
 from Tools.weather import weather_tools
 from Tools.calculator import calculator_tool
+from Tools.knowledge_search import knowledge_tools
+
 
 
 logger = logging.getLogger(__name__)
@@ -90,6 +93,19 @@ class ToolRegistry:
             logger.info("Calculator tool enabled.")
         else:
             logger.info("Calculator tool disabled.")
+
+        # --------------------------------------------------
+        # Knowledge Base tools
+        # --------------------------------------------------
+
+        if RAG_ENABLED:
+            self.register(
+                category="knowledge_base",
+                tools=knowledge_tools,
+            )
+            logger.info("Knowledge Base search tool enabled.")
+        else:
+            logger.info("Knowledge Base search tool disabled.")
 
         logger.info(
             "Built-in tool registry initialized with %d tools "
