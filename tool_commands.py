@@ -292,7 +292,7 @@ def _handle_rag_command(command: str, console: Console | None = None) -> None:
                 return
             chunks = retriever.retrieve(query=target)
             if not chunks:
-                console.print("\n[yellow]No relevant chunks found above similarity threshold.[/yellow]")
+                console.print("\n[yellow]No relevant chunks found.[/yellow]")
                 return
             console.print(f"\n[bold green]Found {len(chunks)} relevant chunk(s):[/bold green]\n")
             for idx, c in enumerate(chunks, 1):
@@ -302,7 +302,7 @@ def _handle_rag_command(command: str, console: Console | None = None) -> None:
 
         elif subcmd == "stats":
             stats = indexer.vector_store.get_stats()
-            from config import RAG_ENABLED, RAG_EMBEDDING_MODEL, RAG_TOP_K, RAG_SIMILARITY_THRESHOLD
+            from config import RAG_ENABLED, RAG_EMBEDDING_MODEL, RAG_TOP_K
             console.print()
             console.print(Panel(
                 f"[bold white]Status:[/bold white] [{'green' if RAG_ENABLED else 'red'}]{'ENABLED' if RAG_ENABLED else 'DISABLED'}[/]\n"
@@ -310,8 +310,7 @@ def _handle_rag_command(command: str, console: Console | None = None) -> None:
                 f"[bold white]Embedding Model:[/bold white] {RAG_EMBEDDING_MODEL}\n"
                 f"[bold white]Total Unique Documents:[/bold white] {stats['total_documents']}\n"
                 f"[bold white]Total Text Chunks:[/bold white] {stats['total_chunks']}\n"
-                f"[bold white]Top-K Default:[/bold white] {RAG_TOP_K}\n"
-                f"[bold white]Similarity Threshold:[/bold white] {RAG_SIMILARITY_THRESHOLD}",
+                f"[bold white]Top-K Default:[/bold white] {RAG_TOP_K}",
                 title="RAG Knowledge System Statistics",
                 border_style="bright_blue",
             ))

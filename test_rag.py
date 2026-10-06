@@ -101,7 +101,6 @@ class TestRAGSystem(unittest.TestCase):
         query_results = self.retriever.retrieve(
             query="Tell me about quantum computing and qubits",
             top_k=3,
-            threshold=0.1,
             enabled=True,
         )
 
@@ -109,21 +108,6 @@ class TestRAGSystem(unittest.TestCase):
         top_result = query_results[0]
         self.assertIn("qubits", top_result["text"].lower())
         self.assertEqual(top_result["metadata"]["filename"], "sample_research.txt")
-
-    def test_similarity_threshold_filtering(self):
-        """Test that chunks below similarity threshold are filtered out."""
-        self.indexer.index_document(self.sample_txt)
-
-        # High similarity threshold for an unrelated topic (e.g., baking recipes)
-        strict_results = self.retriever.retrieve(
-            query="recipe for baking chocolate banana cake with sugar",
-            top_k=3,
-            threshold=0.9, # Very high threshold
-            enabled=True,
-        )
-
-        # Should be empty or filtered out because content is about AI and quantum computing
-        self.assertEqual(len(strict_results), 0)
 
     def test_deletion(self):
         """Test deleting a document and confirming chunk removal."""
@@ -244,7 +228,6 @@ class TestRAGSystem(unittest.TestCase):
         results = self.retriever.retrieve(
             query="quantum computing and machine learning",
             top_k=3,
-            threshold=0.1,
             enabled=True,
         )
 
@@ -268,26 +251,10 @@ class TestRAGSystem(unittest.TestCase):
         results = self.retriever.retrieve(
             query="quantum computing",
             top_k=3,
-            threshold=0.1,
             enabled=True,
         )
 
         self.assertGreater(len(results), 0)
-
-    def test_irrelevant_query_filtering(self):
-        """Test that irrelevant queries return no results with high threshold."""
-        self.indexer.index_document(self.sample_txt)
-
-        # Query for completely unrelated topic with high threshold
-        results = self.retriever.retrieve(
-            query="recipe for chocolate cake baking",
-            top_k=3,
-            threshold=0.9,
-            enabled=True,
-        )
-
-        # Should be empty or very few results
-        self.assertEqual(len(results), 0)
 
 
 if __name__ == "__main__":

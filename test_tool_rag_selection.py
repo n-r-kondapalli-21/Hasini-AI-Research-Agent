@@ -33,17 +33,12 @@ TEST_CASES = [
         "description": "Live web news query",
     },
     {
-        "query": "According to my SQL notes, what is INSERT INTO?",
+        "query": "who is my college crush based on the knowledge base",
         "expect_rag": True,
-        "description": "Explicit reference to indexed SQL notes",
+        "description": "Explicit request to search Knowledge Base for personal info",
     },
     {
-        "query": "What does my indexed document say about Attention Is All You Need?",
-        "expect_rag": True,
-        "description": "Query about indexed Transformer paper",
-    },
-    {
-        "query": "Search my knowledge base for SQL interview questions",
+        "query": "Search my knowledge base for my research notes",
         "expect_rag": True,
         "description": "Explicit command to search Knowledge Base",
     },
@@ -79,6 +74,8 @@ async def run_test():
 
         called_tools = []
         full_response = ""
+
+        await asyncio.sleep(2)
 
         try:
             async for chunk in agent.astream(

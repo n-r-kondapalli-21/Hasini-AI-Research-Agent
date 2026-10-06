@@ -21,7 +21,7 @@ from rich.panel import Panel
 from .indexer import RAGIndexer
 from .retriever import RAGRetriever
 from .vector_store import RAGVectorStore
-from config import RAG_ENABLED, CHROMADB_PATH, RAG_EMBEDDING_MODEL, RAG_TOP_K, RAG_SIMILARITY_THRESHOLD
+from config import RAG_ENABLED, CHROMADB_PATH, RAG_EMBEDDING_MODEL, RAG_TOP_K
 
 console = Console()
 
@@ -91,19 +91,10 @@ def cmd_search(args, retriever: RAGRetriever):
     chunks = retriever.retrieve(
         query=args.query,
         top_k=args.top_k,
-        threshold=args.threshold,
     )
 
     if not chunks:
-        raw = retriever.vector_store.query(query=args.query, top_k=1)
-        top_score = raw[0]["similarity"] if raw else 0.0
-        used_threshold = args.threshold if args.threshold is not None else RAG_SIMILARITY_THRESHOLD
-        console.print(
-            f"[bold yellow]No relevant chunks found above similarity threshold ({used_threshold:.2f}). "
-            f"Top chunk similarity score was {top_score:.4f}.[/bold yellow]\n"
-            f"[dim]Tip: You can query with a lower threshold (`python rag_manage.py search '{args.query}' --threshold 0.1`) "
-            f"or update RAG_SIMILARITY_THRESHOLD in .env.[/dim]"
-        )
+        console.print(f"[bold yellow]No chunks found for query '{args.query}'.[/bold yellow]")
         return
 
     console.print(f"[bold green]Found {len(chunks)} relevant chunk(s):[/bold green]\n")
@@ -127,8 +118,7 @@ def cmd_stats(args, vector_store: RAGVectorStore):
         f"[bold white]Embedding Model:[/bold white] {RAG_EMBEDDING_MODEL}\n"
         f"[bold white]Total Unique Documents:[/bold white] {stats['total_documents']}\n"
         f"[bold white]Total Text Chunks:[/bold white] {stats['total_chunks']}\n"
-        f"[bold white]Top-K Default:[/bold white] {RAG_TOP_K}\n"
-        f"[bold white]Similarity Threshold:[/bold white] {RAG_SIMILARITY_THRESHOLD}\n",
+        f"[bold white]Top-K Default:[/bold white] {RAG_TOP_K}\n",
         title="RAG Knowledge System Statistics",
         border_style="bright_blue",
     ))
@@ -138,6 +128,10 @@ def main():
     configure_logging()
     parser = argparse.ArgumentParser(description="Hasini RAG Knowledge Base Manager")
     subparsers = parser.add_subparsers(dest="command", help="Sub-command help")
+
+    # GUI
+    subparsers.add_parser("gui", help="Launch native Tkinter Desktop GUI")
+    subparsers.add_parser("ui", help="Launch native Tkinter Desktop GUI")
 
     # Add
     p_add = subparsers.add_parser("add", help="Index a document file or URL")
@@ -158,7 +152,6 @@ def main():
     p_sch = subparsers.add_parser("search", help="Test vector search for a query")
     p_sch.add_argument("query", help="Query text to search")
     p_sch.add_argument("--top-k", type=int, default=None, help="Top K results to retrieve")
-    p_sch.add_argument("--threshold", type=float, default=None, help="Similarity score threshold (0.0 to 1.0)")
 
     # Clear
     subparsers.add_parser("clear", help="Clear all indexed knowledge")
@@ -167,9 +160,10 @@ def main():
     subparsers.add_parser("stats", help="View knowledge system statistics")
 
     args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
+    if not args.command or args.command in ("gui", "ui"):
+        from .gui import launch_gui
+        launch_gui()
+        return
 
     vector_store = RAGVectorStore()
     indexer = RAGIndexer(vector_store=vector_store)
@@ -193,3 +187,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

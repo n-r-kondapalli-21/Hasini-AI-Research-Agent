@@ -269,9 +269,6 @@ RAG_EMBEDDING_MODEL=all-MiniLM-L6-v2
 
 # Top-K relevant chunks count
 RAG_TOP_K=5
-
-# Similarity threshold (0.0 to 1.0)
-RAG_SIMILARITY_THRESHOLD=0.3
 ```
 
 ### Managing Documents

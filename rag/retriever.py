@@ -13,7 +13,6 @@ from typing import List, Dict, Any, Optional
 from config import (
     RAG_ENABLED,
     RAG_TOP_K,
-    RAG_SIMILARITY_THRESHOLD,
     RAG_BM25_ENABLED,
     RAG_VECTOR_TOP_K,
     RAG_BM25_TOP_K,
@@ -64,7 +63,6 @@ class RAGRetriever:
         self,
         query: str,
         top_k: Optional[int] = None,
-        threshold: Optional[float] = None,
         enabled: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -73,11 +71,10 @@ class RAGRetriever:
         Args:
             query: User's search query string.
             top_k: Number of final results to return. Defaults to config RAG_FINAL_TOP_K.
-            threshold: Minimum similarity threshold (0.0 to 1.0). Defaults to config RAG_SIMILARITY_THRESHOLD.
             enabled: Override for RAG enabled status. Defaults to config RAG_ENABLED.
 
         Returns:
-            List of chunk dicts passing the relevance threshold.
+            List of chunk dicts retrieved.
         """
         is_enabled = RAG_ENABLED if enabled is None else enabled
         if not is_enabled:
@@ -90,13 +87,11 @@ class RAGRetriever:
 
         query_clean = query.strip()
         final_k = top_k if top_k is not None else RAG_FINAL_TOP_K
-        thresh = threshold if threshold is not None else RAG_SIMILARITY_THRESHOLD
 
         logger.info(
-            "Executing hybrid RAG search for query: '%s' (final_top_k=%d, threshold=%.2f)",
+            "Executing hybrid RAG search for query: '%s' (final_top_k=%d)",
             query_clean,
             final_k,
-            thresh,
         )
 
         # Step 1: Vector search
@@ -170,15 +165,7 @@ class RAGRetriever:
             # No reranking, use fused candidates directly
             final_chunks = fused_candidates
 
-        # Step 6: Apply final similarity threshold and top-k limit
-        if thresh > 0:
-            final_chunks = filter_by_relevance(
-                chunks=final_chunks,
-                threshold=thresh,
-                score_key="similarity",
-            )
-
-        # Apply final top-k limit
+        # Step 6: Apply final top-k limit
         if final_k > 0:
             final_chunks = final_chunks[:final_k]
 
@@ -244,7 +231,6 @@ class RAGRetriever:
         self,
         query: str,
         top_k: Optional[int] = None,
-        threshold: Optional[float] = None,
         enabled: Optional[bool] = None,
     ) -> Optional[str]:
         """
@@ -253,13 +239,12 @@ class RAGRetriever:
         Args:
             query: User prompt or query string.
             top_k: Optional top_k override.
-            threshold: Optional similarity threshold override.
             enabled: Optional enabled status override.
 
         Returns:
             Formatted RAG context string if relevant knowledge found, else None.
         """
-        chunks = self.retrieve(query=query, top_k=top_k, threshold=threshold, enabled=enabled)
+        chunks = self.retrieve(query=query, top_k=top_k, enabled=enabled)
         if not chunks:
             return None
 

@@ -32,14 +32,9 @@ RAGVectorStore (ChromaDB Persistent Storage)
 User Query (CLI, Voice, Telegram)
         │
         ▼
-RAGRetriever (Vector Similarity Search)
+RAGRetriever (Vector + BM25 + Reranking)
         │
         ▼
-Relevance Threshold Filter (similarity >= RAG_SIMILARITY_THRESHOLD)
-        │
-        ├──► No relevant chunks met threshold ──► Agent executes normally
-        │
-        ▼ Relevant chunks found
 Formatted RAG Context (Source Filename, Chunk ID, Similarity, Date, Text)
         │
         ▼
@@ -64,7 +59,7 @@ Final Response
 | [`text_splitter.py`](file:///d:/Hasini_Ai_Research_Agent/rag/text_splitter.py) | Recursive text chunking with metadata attachment (`source`, `filename`, `file_type`, `chunk_id`, `timestamp`). |
 | [`embedding.py`](file:///d:/Hasini_Ai_Research_Agent/rag/embedding.py) | Local `sentence-transformers` loader downloading to `models/embeddings/all-MiniLM-L6-v2/` on 1st setup and loading locally on subsequent runs. |
 | [`indexer.py`](file:///d:/Hasini_Ai_Research_Agent/rag/indexer.py) | Document lifecycle controller (`index_document`, `reindex_document`, `remove_document`, `list_documents`, `clear_all`). |
-| [`retriever.py`](file:///d:/Hasini_Ai_Research_Agent/rag/retriever.py) | Semantic search query processor, similarity score threshold filter, logging reporter, and prompt context formatter. |
+| [`retriever.py`](file:///d:/Hasini_Ai_Research_Agent/rag/retriever.py) | Semantic search query processor, logging reporter, and prompt context formatter. |
 | [`cli.py`](file:///d:/Hasini_Ai_Research_Agent/rag/cli.py) | Command-line management tool interface. |
 
 ---
@@ -91,10 +86,6 @@ RAG_EMBEDDING_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
 
 # Maximum number of top relevant chunks to retrieve per query
 RAG_TOP_K=5
-
-# Minimum similarity threshold (0.0 to 1.0)
-# Chunks with similarity score below this value will be ignored
-RAG_SIMILARITY_THRESHOLD=0.3
 ```
 
 ---

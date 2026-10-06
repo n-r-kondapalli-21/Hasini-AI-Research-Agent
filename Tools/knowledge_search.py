@@ -19,24 +19,17 @@ logger = logging.getLogger(__name__)
 @tool
 def search_knowledge_base(query: str) -> str:
     """
-    Search the user's private indexed Knowledge Base documents.
-
-    Topics covered in the Knowledge Base:
-    - SQL database notes, queries, syntax, commands (e.g., INSERT INTO, SELECT, JOINs), and SQL interview questions.
-    - NIPS 2017 "Attention Is All You Need" paper on Transformer neural network architecture, self-attention, multi-head attention, and sequence modeling.
-    - Manually indexed personal research notes, documentation, and reference papers.
+    Search the user's private indexed Knowledge Base documents for relevant information.
 
     When to use:
-    - The user explicitly asks about their indexed documents or asks to search the Knowledge Base.
-    - The question depends on information in private/indexed documents (e.g. SQL notes, Attention Is All You Need paper).
-    - The topic specifically relates to material indexed in the user's local Knowledge Base.
+    - Whenever the user explicitly asks to search or check the Knowledge Base, indexed documents, or personal files.
+    - Whenever you cannot answer the user query with your own general knowledge and need to check for relevant information in the Knowledge Base.
+    - Whenever the query depends on private knowledge, personal notes, documents, or custom data stored in the user's Knowledge Base.
 
     Do NOT use for:
-    - Greetings, small talk, general conversation.
-    - Mathematics, calculations, logic puzzles.
-    - Current/live information, real-time events, or web queries (use web_search for these).
-    - Weather forecasts, market/stock data.
-    - Questions answerable directly from general knowledge or the current conversation history.
+    - Simple greetings, small talk, or general casual conversation.
+    - Basic mathematics or simple calculations.
+    - Live external web information, breaking news, or web searches (use web_search for live web info).
     """
     if not RAG_ENABLED:
         logger.warning("Knowledge base search attempted, but RAG_ENABLED is false.")

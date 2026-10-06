@@ -11,6 +11,11 @@ ZAI_API_KEY = os.getenv("ZAI_API_KEY")
 # Select LLM provider from .env
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter")
 MODEL_NAME = os.getenv("MODEL_NAME")
+try:
+    TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
+except (ValueError, TypeError):
+    TEMPERATURE = 0.7
+
 
 # LLM Providers
 PROVIDERS = {
@@ -100,7 +105,6 @@ RAG_EMBEDDING_MODEL_PATH = os.getenv("RAG_EMBEDDING_MODEL_PATH", "models/embeddi
 RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", RAG_EMBEDDING_MODEL_NAME)
 
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
-RAG_SIMILARITY_THRESHOLD = float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.3"))
 
 # ============================================================
 # Hybrid Search Configuration

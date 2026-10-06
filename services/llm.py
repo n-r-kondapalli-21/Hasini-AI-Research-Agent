@@ -7,7 +7,7 @@ import logging
 
 from langchain_openai import ChatOpenAI
 
-from config import provider, MODEL_NAME
+from config import provider, MODEL_NAME, TEMPERATURE
 
 
 logger = logging.getLogger("hasini.llm")
@@ -28,6 +28,7 @@ def _build_llm() -> ChatOpenAI:
             model=MODEL_NAME,
             api_key=provider["api_key"],
             base_url=provider["base_url"],
+            temperature=TEMPERATURE,
             timeout=60,
             max_retries=2,
         )

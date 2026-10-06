@@ -44,7 +44,7 @@ def _print_rich_banner(startup_duration: float) -> None:
     banner_text.append(f"{memory_status}", style=memory_style)
     banner_text.append(f" (History Limit: {MEMORY_HISTORY_LIMIT})\n", style="dim white")
 
-    from config import RAG_ENABLED, RAG_SIMILARITY_THRESHOLD, RAG_BM25_ENABLED, RAG_RERANKER_ENABLED
+    from config import RAG_ENABLED, RAG_BM25_ENABLED, RAG_RERANKER_ENABLED
     rag_status = "Enabled" if RAG_ENABLED else "Disabled"
     rag_style = "bold green" if RAG_ENABLED else "bold red"
     banner_text.append("📚 RAG Knowledge Base: ", style="bold white")
@@ -59,7 +59,7 @@ def _print_rich_banner(startup_duration: float) -> None:
         if features:
             banner_text.append(f" ({', '.join(features)})", style="dim white")
 
-    banner_text.append(f" (Threshold: {RAG_SIMILARITY_THRESHOLD})\n\n", style="dim white")
+    banner_text.append("\n\n", style="dim white")
 
     banner_text.append("Available Commands:\n", style="bold yellow")
     banner_text.append("  • ", style="cyan")
@@ -105,12 +105,11 @@ def _print_rich_banner(startup_duration: float) -> None:
     banner_text.append(f"{memory_status}", style=memory_style)
     banner_text.append(f" (History Limit: {MEMORY_HISTORY_LIMIT})\n", style="dim white")
 
-    from config import RAG_ENABLED, RAG_SIMILARITY_THRESHOLD
+    from config import RAG_ENABLED
     rag_status = "Enabled" if RAG_ENABLED else "Disabled"
     rag_style = "bold green" if RAG_ENABLED else "bold red"
     banner_text.append("📚 RAG Knowledge Base: ", style="bold white")
-    banner_text.append(f"{rag_status}", style=rag_style)
-    banner_text.append(f" (Threshold: {RAG_SIMILARITY_THRESHOLD})\n\n", style="dim white")
+    banner_text.append(f"{rag_status}\n\n", style=rag_style)
 
     banner_text.append("Available Commands:\n", style="bold yellow")
     banner_text.append("  • ", style="cyan")
